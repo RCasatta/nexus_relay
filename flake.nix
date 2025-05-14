@@ -16,7 +16,13 @@
           pname = "liquidex_websocket";
           version = "0.1.0";
           src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            outputHashes = {
+              "lwk_wollet-0.9.0" = "sha256-HfXMXOM8jyU/dV3nYApVA3GsegW2pOX50ZfEDavbwoM=";
+              "lwk_common-0.9.0" = "sha256-HfXMXOM8jyU/dV3nYApVA3GsegW2pOX50ZfEDavbwoM=";
+            };
+          };
           nativeBuildInputs = with pkgs; [
             pkg-config
           ];
@@ -45,3 +51,4 @@
         };
       });
 } 
+

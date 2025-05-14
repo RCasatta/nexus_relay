@@ -9,8 +9,8 @@ tokio-tungstenite = "0.19"
 futures-util = "0.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-lwk_wollet = { path = "../lwk/lwk_wollet" }
+lwk_wollet = "0.9.0"
 
 [patch.crates-io]
-lwk_wollet = { path = "../lwk/lwk_wollet" }
-lwk_common = { path = "../lwk/lwk_common" }
+lwk_wollet = { git = "https://github.com/Blockstream/lwk", branch = "master" }
+lwk_common = { git = "https://github.com/Blockstream/lwk", branch = "master" }

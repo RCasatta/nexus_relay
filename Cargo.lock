@@ -1250,6 +1250,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 [[package]]
 name = "lwk_common"
 version = "0.9.0"
+source = "git+https://github.com/Blockstream/lwk?branch=master#492408a0a2a8d7f2ae373c6158f7973ee36f3616"
 dependencies = [
  "base64 0.21.7",
  "elements",
@@ -1264,6 +1265,7 @@ dependencies = [
 [[package]]
 name = "lwk_wollet"
 version = "0.9.0"
+source = "git+https://github.com/Blockstream/lwk?branch=master#492408a0a2a8d7f2ae373c6158f7973ee36f3616"
 dependencies = [
  "aes-gcm-siv",
  "age",
