@@ -116,8 +116,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 // The actual async implementation
 async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "127.0.0.1:8080";
-    let listener = TcpListener::bind(addr).await?;
+    // Parse command line arguments for port
+    let args: Vec<String> = std::env::args().collect();
+    let port = if args.len() > 1 {
+        match args[1].parse::<u16>() {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!("Invalid port number, using default 8080");
+                8080
+            }
+        }
+    } else {
+        8080
+    };
+
+    let addr = format!("127.0.0.1:{}", port);
+    let listener = TcpListener::bind(&addr).await?;
     println!("WebSocket server listening on: {}", addr);
 
     // Create our shared topic registry
