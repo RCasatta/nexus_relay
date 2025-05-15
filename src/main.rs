@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::Message;
 enum ClientMessage {
     Subscribe(String),
     Publish(LiquidexProposal<Validated>),
+    Ping,
     Error(String),
 }
 
@@ -54,6 +55,8 @@ fn parse_client_message(text: &str) -> ClientMessage {
             }
             Err(error) => ClientMessage::Error(format!("Invalid proposal: {}", error)),
         }
+    } else if text.trim() == "PING" {
+        ClientMessage::Ping
     } else {
         ClientMessage::Error("Cannot parse message".to_string())
     }
@@ -130,7 +133,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         8080
     };
 
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("0.0.0.0:{}", port);
     let listener = TcpListener::bind(&addr).await?;
     println!("WebSocket server listening on: {}", addr);
 
@@ -242,6 +245,13 @@ async fn handle_connection(
                         ))
                         .is_err()
                     {
+                        break;
+                    }
+                }
+
+                ClientMessage::Ping => {
+                    // Handle PING message
+                    if client_tx_clone.send("PONG".to_string()).is_err() {
                         break;
                     }
                 }

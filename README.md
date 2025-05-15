@@ -71,11 +71,27 @@ Where proposal json has the following format:
 }
 ```
 
-A client subscribed with the following would receive the previous proposal:
+A client previously subscribed with the following message would receive the previous proposal:
 
 ```
 SUBSCRIBE:6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7:f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28
 ```
+
+### PING
+
+To keep the connection alive or check if the server is responsive, you can send a PING message:
+
+```
+PING
+```
+
+The server will respond with a PONG message:
+
+```
+PONG
+```
+
+This can be useful for detecting disconnections or ensuring that the WebSocket connection remains active during periods of inactivity.
 
 
 ## Testing
