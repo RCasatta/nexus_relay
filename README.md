@@ -6,7 +6,8 @@ A WebSocket server with a simple publish/subscribe text based message protocol u
 - Share PSETs for signing in multisignature setups.
 - Create multisignature setups.
 
-Note this is a simple relay mechanism or a "dumb pipe" providing a transport layer which can be encrypted via ssl but it leaves other security implementation and details to the clients.
+Note in the most generic case this is a simple relay mechanism or a "dumb pipe" providing a transport layer which can be encrypted via ssl but it leaves other security implementation and details to the clients.
+In some specific cases, like publishing a Liquidex Proposal, there are some validations provided by the server.
 
 ## Building and Running
 
@@ -29,6 +30,7 @@ The server uses a simple text-based protocol, the message follow this structure:
 
 The following message types are possible, specific details for message type in the following section:
 
+* PUBLISH_PROPOSAL
 * PUBLISH
 * SUBSCRIBE
 * UNSUBSCRIBE
@@ -47,13 +49,13 @@ The response from the server will include this same ID in the reply for linking 
 
 ### Length
 
-Contain the lenght of the following content. Use a decimal base instead of mode compact hexadecimal for human readability.
+Contain the lenght of the following content. Use a decimal base instead of a more compact hexadecimal for human readability.
 
 ## Message examples:
 
-Publish JSON: `PUBLISH|0|XYZGBH|17|{"message":"hello"}`
+Publish generic: `PUBLISH|0|XYZGBH|25|topic|{"message":"hello"}`
 
-Publish BASE64: `PUBLISH|0|XYZGBH|8|SGVsbG8=`
+Publish Proposal: `PUBLISH_PROPOSAL|0|XYZGBH|12345|$PROPOSAL`
 
 Response: `RESULT|0|XYZGBH|19|{"response":"success"}` or `ACK|0|XYZGBH|0|`
 
@@ -67,28 +69,22 @@ Subscribe: `SUBSCRIBE|0|ABCDEF|8|mytopic1`
 
 ## Messages
 
-### SUBSCRIBE
-
-The clients can subscribe to a topic which is a just a string.
-However there are topics with suggested format:
-
-* Liquidex: Use topic `sell_asset_id|buy_asset_id` to receive proposal selling/buying the specified asset ids
-* Psets: Use topic `wallet_id` as specified in https://github.com/ElementsProject/ELIPs/pull/25 to receive PSETs published relative to the `wallet_id`. Note the server don't and can't guarantee pset received are generated from `wallet_id` and must be validated client side, for example validating that in the PSET there are already signature from other member of the `wallet_id` and verifying PSET outputs.
-* Setups: Use a `random_string` as topic for custom coordination such as multisig setup
-
-For example if I am interested in buying LBTC with USDT in Liquid Mainnet:
-
-```
-SUBSCRIBE|0|XYZ|129|ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2|6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d
-```
-
-
 ### PUBLISH
 
-To publish a PSET or a swap proposal, send a message in this format:
+To publish a generic string on any given topic like
 
 ```
-PUBLISH|0|ABC|12345|$PROPOSAL_JSON
+PUBLISH|0|XYZGBH|25|topic|{"message":"hello"}
+```
+
+The publish message content must start with a topic followed by a separator `|`. The topic can be max 64 chars.
+
+### PUBLISH_PROPOSAL
+
+To publish a swap proposal, send a message in this format:
+
+```
+PUBLISH_PROPOSAL|0|XYZGBH|12345|$PROPOSAL_JSON
 ```
 Where `$PROPOSAL_JSON` has the following format (removed tx hex for brevity):
 
@@ -112,6 +108,28 @@ Where `$PROPOSAL_JSON` has the following format (removed tx hex for brevity):
         "95e27208708a7b57e0ec3b562bbe0dd56548bb9d0359d7f9a8604dfd9ec02eba"
     ]
 }
+```
+
+The topic of this proposal is automatically inferred by the proposal json and will be `6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7:f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28`
+
+Note that in this case the topic is longer than the 64 chars enforced by the generic publish so that clients subscribing to this topic has reasonable guarantee there have been some validation on the proposal by the server. Validations include:
+
+- Input exists and it's unspent
+- Liquidex validation rules (see method [validate](https://github.com/Blockstream/lwk/blob/16ec78caf4ba212d38de89446dc519deaba61567/lwk_wollet/src/liquidex.rs#L227) on LiqudexProposal)
+
+### SUBSCRIBE
+
+The clients can subscribe to a topic which is a just a string.
+However there are topics with suggested format:
+
+* Liquidex: Use topic `sell_asset_id|buy_asset_id` to receive proposal selling/buying the specified asset ids
+* Psets: Use topic `wallet_id` as specified in https://github.com/ElementsProject/ELIPs/pull/25 to receive PSETs published relative to the `wallet_id`. Note the server don't and can't guarantee pset received are generated from `wallet_id` and must be validated client side, for example validating that in the PSET there are already signature from other member of the `wallet_id` and verifying PSET outputs.
+* Setups: Use a `random_string` as topic for custom coordination such as multisig setup
+
+For example if I am interested in buying LBTC with USDT in Liquid Mainnet:
+
+```
+SUBSCRIBE|0|XYZ|129|ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2|6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d
 ```
 
 ### PING
