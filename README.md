@@ -30,8 +30,8 @@ The server uses a simple text-based protocol, the message follow this structure:
 
 The following message types are possible, specific details for message type in the following section:
 
-* PUBLISH_PROPOSAL
 * PUBLISH
+* PUBLISH_PROPOSAL
 * SUBSCRIBE
 * UNSUBSCRIBE
 * RESULT
