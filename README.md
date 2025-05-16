@@ -41,11 +41,11 @@ The following message types are possible, specific details for message type in t
 
 ### Version
 
-Only 0 for now, may be increased for future updates
+Only 0 for now. The implementation strictly enforces this value and will reject messages with any other version.
 
 ### Random ID
 
-The response from the server will include this same ID in the reply for linking request and response if they interleaves. Can be length from 0 to 10 chars
+The response from the server will include this same ID in the reply for linking request and response if they interleaves. It's a number up to 2^64.
 
 ### Length
 
@@ -53,19 +53,19 @@ Contain the lenght of the following content. Use a decimal base instead of a mor
 
 ## Message examples:
 
-Publish generic: `PUBLISH|0|XYZGBH|25|topic|{"message":"hello"}`
+Publish generic: `PUBLISH|0|1|25|topic|{"message":"hello"}`
 
-Publish Proposal: `PUBLISH_PROPOSAL|0|XYZGBH|12345|$PROPOSAL`
+Publish Proposal: `PUBLISH_PROPOSAL|0|1|9|$PROPOSAL`
 
-Response: `RESULT|0|XYZGBH|19|{"response":"success"}` or `ACK|0|XYZGBH|0|`
+Response: `RESULT|0|1|22|{"response":"success"}` or `ACK|0|12345|0|`
 
-Ping: `PING|0||0|`
+Ping: `PING|0|0|0|`
 
-Pong: `PONG|0||0|`
+Pong: `PONG|0|0|0|`
 
-Error: `ERROR|0|XYZGBH|10|InvalidTopic`
+Error: `ERROR|0|1|12|InvalidTopic`
 
-Subscribe: `SUBSCRIBE|0|ABCDEF|8|mytopic1`
+Subscribe: `SUBSCRIBE|0|1|8|mytopic1`
 
 ## Messages
 
@@ -84,7 +84,7 @@ The publish message content must start with a topic followed by a separator `|`.
 To publish a swap proposal, send a message in this format:
 
 ```
-PUBLISH_PROPOSAL|0|XYZGBH|12345|$PROPOSAL_JSON
+PUBLISH_PROPOSAL|0|123|12345|$PROPOSAL_JSON
 ```
 Where `$PROPOSAL_JSON` has the following format (removed tx hex for brevity):
 

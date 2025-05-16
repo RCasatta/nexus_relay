@@ -10,6 +10,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
+mod message;
+
 // Define the message format for topic subscription and publishing
 #[derive(Debug)]
 enum ClientMessage {
