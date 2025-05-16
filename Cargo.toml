@@ -1,5 +1,5 @@
 [package]
-name = "liquidex_websocket"
+name = "nexus_relay"
 version = "0.1.0"
 edition = "2021"
 

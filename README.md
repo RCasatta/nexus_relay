@@ -1,4 +1,4 @@
-# WebSocket Relay: A Pub/Sub Server for Wallet Coordination
+# NexusRelay: A WebSocket Pub/Sub Relay for Wallet Coordination
 
 A WebSocket server with a simple publish/subscribe text based message protocol useful for the following use-cases:
 

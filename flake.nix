@@ -1,5 +1,5 @@
 {
-  description = "WebSocket Server for Liquidex swap proposals";
+  description = "NexusRelay: A WebSocket Pub/Sub Relay for Wallet Coordination";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -13,7 +13,7 @@
       in
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "liquidex_websocket";
+          pname = "nexus_relay";
           version = "0.1.0";
           src = ./.;
           cargoLock = {
@@ -43,7 +43,7 @@
           
           # Set environment variables if needed
           shellHook = ''
-            echo "Liquidex WebSocket development environment"
+            echo "NexusRelay development environment"
             echo "Use 'cargo build' to build the project"
             echo "Use 'cargo run' to run the server"
             echo "Use 'websocat' to test WebSocket connections"
