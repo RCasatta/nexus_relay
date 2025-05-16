@@ -1,10 +1,12 @@
-# WebSocket Server for Wallet coordination
+# WebSocket Relay: A Pub/Sub Server for Wallet Coordination
 
 A WebSocket server with a simple publish/subscribe text based message protocol useful for the following use-cases:
 
 - Publish Liquidex swap proposals and to subscribe to receive proposals from others. To make and take proposal you can use [LWK](https://github.com/blockstream/lwk)
-- Share PSETs for signing in multisignature setups
-- Create multisignature setups
+- Share PSETs for signing in multisignature setups.
+- Create multisignature setups.
+
+Note this is a simple relay mechanism or a "dumb pipe" providing a transport layer which can be encrypted via ssl but it leaves other security implementation and details to the clients.
 
 ## Building and Running
 
@@ -41,7 +43,7 @@ Only 0 for now, may be increased for future updates
 
 ### Random ID
 
-The response from the server will include this same ID in the reply, can be length from 0 to 10 chars
+The response from the server will include this same ID in the reply for linking request and response if they interleaves. Can be length from 0 to 10 chars
 
 ### Length
 
@@ -68,10 +70,10 @@ Subscribe: `SUBSCRIBE|0|ABCDEF|8|mytopic1`
 ### SUBSCRIBE
 
 The clients can subscribe to a topic which is a just a string.
-However there are standard topics:
+However there are topics with suggested format:
 
 * Liquidex: Use topic `sell_asset_id|buy_asset_id` to receive proposal selling/buying the specified asset ids
-* Psets: Use topic `wallet_id` as specified in https://github.com/ElementsProject/ELIPs/pull/25 to receive PSETs published relative to the `wallet_id`. Note the server don't and can't guarantee pset received are generated from `wallet_id` and must be validated client side.
+* Psets: Use topic `wallet_id` as specified in https://github.com/ElementsProject/ELIPs/pull/25 to receive PSETs published relative to the `wallet_id`. Note the server don't and can't guarantee pset received are generated from `wallet_id` and must be validated client side, for example validating that in the PSET there are already signature from other member of the `wallet_id` and verifying PSET outputs.
 * Setups: Use a `random_string` as topic for custom coordination such as multisig setup
 
 For example if I am interested in buying LBTC with USDT in Liquid Mainnet:
@@ -79,7 +81,6 @@ For example if I am interested in buying LBTC with USDT in Liquid Mainnet:
 ```
 SUBSCRIBE|0|XYZ|129|ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2|6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d
 ```
-
 
 
 ### PUBLISH
