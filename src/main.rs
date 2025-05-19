@@ -1,5 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use message::{proposal_topic, Error, Message, MessageType};
+use serde_json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -252,6 +253,10 @@ mod tests {
     use super::*;
     use crate::message::{Message, MessageType};
 
+    fn proposal_str() -> &'static str {
+        include_str!("../test_data/proposal.json")
+    }
+
     fn process_message_test<'a>(
         message_request: &'a Message<'a>,
         registry: &mut TopicRegistry,
@@ -318,5 +323,53 @@ mod tests {
 
         // Verify response
         assert_eq!(err.to_string(), "ERROR||1|13|Missing topic");
+    }
+
+    #[test]
+    fn test_subscribe() {
+        let id1 = 12341234;
+        let id2 = 12341235;
+        let proposal_json = proposal_str();
+        let message_publish = format!(
+            "PUBLISH_PROPOSAL||{id1}|{}|{}",
+            proposal_json.len(),
+            proposal_json
+        );
+        let message_publish = Message::parse(&message_publish).unwrap();
+        let proposal = message_publish.proposal().unwrap();
+        let validated = proposal.insecure_validate().unwrap();
+        let topic = proposal_topic(&validated).unwrap();
+        assert_eq!(topic, "6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7|f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28");
+
+        // Subscribe to the topic of the proposal
+        let message_str = format!("SUBSCRIBE||{id2}|129|{topic}");
+        let message = Message::parse(&message_str).unwrap();
+        let mut registry = TopicRegistry::new();
+        let (client_tx1, mut client_rx1) = mpsc::unbounded_channel();
+        // Process the message
+        let message_response = process_message(&message, &mut registry, &client_tx1).unwrap();
+
+        // Verify response
+        assert_eq!(
+            message_response.to_string(),
+            format!("RESULT||{id2}|10|subscribed")
+        );
+
+        // Publish the proposal as another client
+        let (client_tx2, _client_rx2) = mpsc::unbounded_channel();
+        let message_response =
+            process_message(&message_publish, &mut registry, &client_tx2).unwrap();
+        assert_eq!(
+            message_response.to_string(),
+            format!("RESULT||{id1}|18|proposal published")
+        );
+        let message_received = client_rx1.blocking_recv().unwrap();
+        let parsed_message = Message::parse(&message_received).unwrap();
+
+        // Parse both strings to ensure we compare JSON content, not formatting
+        let json1: serde_json::Value = serde_json::from_str(parsed_message.content()).unwrap();
+        let json2: serde_json::Value = serde_json::from_str(proposal_str()).unwrap();
+
+        assert_eq!(json1, json2);
     }
 }
