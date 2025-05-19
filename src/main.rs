@@ -1,8 +1,9 @@
 use futures_util::{SinkExt, StreamExt};
+use lwk_wollet::elements::AssetId;
 use message::{proposal_topic, Error, Message, MessageType};
-use serde_json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -143,16 +144,28 @@ fn process_message<'a>(
         MessageType::Subscribe => {
             let topic = message_request.content().to_string();
             if topic.is_empty() {
-                Err(Box::new(Error::MissingTopic))
-            } else if topic.len() > 129 {
-                // TODO: handle proposal topic, error for other cases longer than 64 chars
-                Err(Box::new(Error::InvalidTopic))
-            } else {
-                registry.subscribe(topic, client_tx_clone.clone());
-                let message_response =
-                    Message::new(MessageType::Result, message_request.random_id, "subscribed");
-                Ok(message_response)
+                return Err(Box::new(Error::MissingTopic));
             }
+            if topic.len() > 64 {
+                // if the topic is longer than 64 chars, it must be a proposal topic
+                let mut assets = topic.splitn(2, '|');
+                if let (Some(asset1), Some(asset2)) = (assets.next(), assets.next()) {
+                    let asset1 = AssetId::from_str(asset1);
+                    let asset2 = AssetId::from_str(asset2);
+                    if let (Ok(_), Ok(_)) = (asset1, asset2) {
+                        // topic validated
+                    } else {
+                        return Err(Box::new(Error::InvalidTopic));
+                    }
+                } else {
+                    return Err(Box::new(Error::InvalidTopic));
+                }
+            }
+
+            registry.subscribe(topic, client_tx_clone.clone());
+            let message_response =
+                Message::new(MessageType::Result, message_request.random_id, "subscribed");
+            Ok(message_response)
         }
         MessageType::Result => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
         MessageType::Error => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
