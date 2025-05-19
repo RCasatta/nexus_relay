@@ -6,63 +6,12 @@ use std::sync::{Arc, Mutex};
 use futures_util::{SinkExt, StreamExt};
 use lwk_wollet::elements::AssetId;
 use lwk_wollet::{LiquidexProposal, Validated};
+use message::{MessageType, RawMessage};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 
 mod message;
-
-// Define the message format for topic subscription and publishing
-#[derive(Debug)]
-enum ClientMessage {
-    Subscribe(String),
-    Publish(LiquidexProposal<Validated>),
-    Ping,
-    Error(String),
-}
-
-// Parse text messages into our message format
-fn parse_client_message(text: &str) -> ClientMessage {
-    if text.starts_with("SUBSCRIBE:") {
-        let topic = text
-            .strip_prefix("SUBSCRIBE:")
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        let mut assets = topic.splitn(2, ':');
-        if let (Some(asset1), Some(asset2)) = (assets.next(), assets.next()) {
-            let asset1 = AssetId::from_str(asset1);
-            let asset2 = AssetId::from_str(asset2);
-            if let (Ok(asset1), Ok(asset2)) = (asset1, asset2) {
-                ClientMessage::Subscribe(format!("{}:{}", asset1, asset2))
-            } else {
-                ClientMessage::Error("Invalid asset ID".to_string())
-            }
-        } else {
-            ClientMessage::Error("Cannot parse SUBSCRIBE message".to_string())
-        }
-    } else if text.starts_with("PUBLISH:") {
-        let content = text
-            .strip_prefix("PUBLISH:")
-            .expect("just checkt with starts with");
-
-        let proposal = LiquidexProposal::from_str(content);
-        match proposal {
-            Ok(proposal) => {
-                if let Ok(proposal) = proposal.insecure_validate() {
-                    ClientMessage::Publish(proposal)
-                } else {
-                    ClientMessage::Error("proposal does not validate".to_string())
-                }
-            }
-            Err(error) => ClientMessage::Error(format!("Invalid proposal: {}", error)),
-        }
-    } else if text.trim() == "PING" {
-        ClientMessage::Ping
-    } else {
-        ClientMessage::Error("Cannot parse message".to_string())
-    }
-}
 
 // Our global state to track topic subscribers
 struct TopicRegistry {
@@ -154,6 +103,46 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// Process a message and return the response to send back to the client
+fn process_message<'a>(
+    raw_message: &'a RawMessage<'a>,
+    registry: &mut TopicRegistry,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match raw_message.type_ {
+        MessageType::Publish => {
+            todo!()
+        }
+        MessageType::PublishProposal => {
+            let proposal = LiquidexProposal::from_str(raw_message.content)?;
+            let proposal = proposal.insecure_validate()?;
+            let topic = format!("{}:{}", proposal.input().asset, proposal.output().asset);
+            let content = format!("{}", proposal);
+
+            let sent_count = registry.publish(&topic, content);
+
+            // Return confirmation message
+            Ok(format!(
+                "RESULT:Message sent to {} subscribers on topic: {}",
+                sent_count, topic
+            ))
+        }
+        MessageType::Subscribe => {
+            let topic = raw_message.content.to_string();
+            if topic.is_empty() {
+                return Ok("Error: Empty topic name".to_string());
+            }
+
+            // Topic is valid, return success message
+            Ok("RESULT:subscribed".to_string())
+        }
+        MessageType::Result => todo!(),
+        MessageType::Ack => todo!(),
+        MessageType::Error => Ok("ERROR".to_string()),
+        MessageType::Ping => Ok("PONG".to_string()),
+        MessageType::Pong => todo!(),
+    }
+}
+
 async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
@@ -198,71 +187,46 @@ async fn handle_connection(
         };
 
         if let Message::Text(text) = msg {
-            match parse_client_message(&text) {
-                ClientMessage::Subscribe(topic) => {
-                    if topic.is_empty() {
-                        if client_tx_clone
-                            .send("Error: Empty topic name".to_string())
-                            .is_err()
-                        {
-                            break;
-                        }
-                        continue;
-                    }
-
-                    println!("Client {} subscribing to topic: {}", addr, topic);
-
-                    // Add to client's topic list
-                    client_topics.push(topic.clone());
-
-                    // Add client to the topic registry
-                    {
-                        let mut registry = registry_clone.lock().unwrap();
-                        registry.subscribe(topic.clone(), client_tx_clone.clone());
-                    }
-
-                    // Send confirmation
+            let raw_message = match RawMessage::parse(&text) {
+                Ok(msg) => msg,
+                Err(e) => {
                     if client_tx_clone
-                        .send("RESULT:subscribed".to_string())
+                        .send(format!("Error parsing message: {}", e))
                         .is_err()
                     {
                         break;
                     }
+                    continue;
                 }
+            };
 
-                ClientMessage::Publish(proposal) => {
-                    let topic = format!("{}:{}", proposal.input().asset, proposal.output().asset);
-                    let content = format!("{}", proposal);
-
-                    let sent_count = {
-                        let mut registry = registry_clone.lock().unwrap();
-                        registry.publish(&topic, content)
-                    };
-
-                    // Send confirmation
-                    if client_tx_clone
-                        .send(format!(
-                            "RESULT:Message sent to {} subscribers on topic: {}",
-                            sent_count, topic
-                        ))
-                        .is_err()
-                    {
-                        break;
-                    }
+            // Process the message and get response
+            let response = {
+                let mut registry = registry_clone.lock().unwrap();
+                match process_message(&raw_message, &mut registry) {
+                    Ok(response) => response,
+                    Err(e) => format!("Error processing message: {}", e),
                 }
+            };
 
-                ClientMessage::Ping => {
-                    // Handle PING message
-                    if client_tx_clone.send("PONG".to_string()).is_err() {
-                        break;
-                    }
-                }
+            // For subscription messages, update client's topics
+            if raw_message.type_ == MessageType::Subscribe && !raw_message.content.is_empty() {
+                let topic = raw_message.content.to_string();
+                println!("Client {} subscribing to topic: {}", addr, topic);
 
-                ClientMessage::Error(error) => {
-                    if client_tx_clone.send(format!("ERROR:{}", error)).is_err() {
-                        break;
-                    }
+                // Add to client's topic list
+                client_topics.push(topic.clone());
+
+                // Add client to the topic registry
+                {
+                    let mut registry = registry_clone.lock().unwrap();
+                    registry.subscribe(topic, client_tx_clone.clone());
                 }
+            }
+
+            // Send response back to client
+            if client_tx_clone.send(response).is_err() {
+                break;
             }
         }
     }
@@ -276,4 +240,52 @@ async fn handle_connection(
     let _ = forward_task.await;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::message::{MessageType, RawMessage};
+
+    #[test]
+    fn test_process_message_ping() {
+        // Create test message and registry
+        let message_str = "PING|0|0|0|";
+        let raw_message = RawMessage::parse(message_str).unwrap();
+        let mut registry = TopicRegistry::new();
+
+        // Process the message
+        let response = process_message(&raw_message, &mut registry).unwrap();
+
+        // Verify response
+        assert_eq!(response, "PONG");
+    }
+
+    #[test]
+    fn test_process_message_subscribe() {
+        // Create test message with a topic
+        let message_str = "SUBSCRIBE|0|1|6|topic1";
+        let raw_message = RawMessage::parse(message_str).unwrap();
+        let mut registry = TopicRegistry::new();
+
+        // Process the message
+        let response = process_message(&raw_message, &mut registry).unwrap();
+
+        // Verify response
+        assert_eq!(response, "RESULT:subscribed");
+    }
+
+    #[test]
+    fn test_process_message_subscribe_empty_topic() {
+        // Create test message with empty topic
+        let message_str = "SUBSCRIBE|0|1|0|";
+        let raw_message = RawMessage::parse(message_str).unwrap();
+        let mut registry = TopicRegistry::new();
+
+        // Process the message
+        let response = process_message(&raw_message, &mut registry).unwrap();
+
+        // Verify response
+        assert_eq!(response, "Error: Empty topic name");
+    }
 }
