@@ -4,9 +4,8 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
-use lwk_wollet::elements::AssetId;
-use lwk_wollet::{LiquidexProposal, Validated};
-use message::{Message, MessageType};
+use lwk_wollet::LiquidexProposal;
+use message::{Error, Message, MessageType};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as TokioMessage;
@@ -34,7 +33,7 @@ impl TopicRegistry {
     }
 
     // Send a message to all subscribers of a topic
-    fn publish(&mut self, topic: &str, message: String) -> usize {
+    fn publish(&mut self, topic: &str, message: Message) -> usize {
         let subscribers = self
             .topics
             .entry(topic.to_string())
@@ -43,7 +42,7 @@ impl TopicRegistry {
 
         // Remove subscribers that are closed
         subscribers.retain(|sender| {
-            let is_open = match sender.send(message.clone()) {
+            let is_open = match sender.send(message.to_string()) {
                 Ok(_) => {
                     sent_count += 1;
                     true
@@ -105,40 +104,51 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
 // Process a message and return the response to send back to the client
 fn process_message<'a>(
-    raw_message: &'a Message<'a>,
+    message_request: &'a Message<'a>,
     registry: &mut TopicRegistry,
-) -> Result<String, Box<dyn std::error::Error>> {
-    match raw_message.type_ {
+) -> Result<Message<'a>, Box<dyn std::error::Error>> {
+    match message_request.type_ {
         MessageType::Publish => {
             todo!()
         }
         MessageType::PublishProposal => {
-            let proposal = LiquidexProposal::from_str(raw_message.content)?;
+            let proposal = LiquidexProposal::from_str(message_request.content)?;
             let proposal = proposal.insecure_validate()?;
             let topic = format!("{}:{}", proposal.input().asset, proposal.output().asset);
             let content = format!("{}", proposal);
-
-            let sent_count = registry.publish(&topic, content);
-
-            // Return confirmation message
-            Ok(format!(
-                "RESULT:Message sent to {} subscribers on topic: {}",
+            let message_to_subscriber = Message::new(MessageType::Result, 0, None, &content);
+            let sent_count = registry.publish(&topic, message_to_subscriber);
+            println!(
+                "Message sent to {} subscribers on topic: {}",
                 sent_count, topic
-            ))
+            );
+            let message_response = Message::new(MessageType::Ack, 0, message_request.random_id, "");
+            Ok(message_response)
         }
         MessageType::Subscribe => {
-            let topic = raw_message.content.to_string();
+            let topic = message_request.content();
             if topic.is_empty() {
-                return Ok("Error: Empty topic name".to_string());
+                Err(Box::new(Error::MissingTopic))
+            } else if topic.len() > 64 {
+                Err(Box::new(Error::InvalidTopic))
+            } else {
+                let message_response = Message::new(
+                    MessageType::Result,
+                    0,
+                    message_request.random_id,
+                    "subscribed",
+                );
+                Ok(message_response)
             }
-
-            // Topic is valid, return success message
-            Ok("RESULT:subscribed".to_string())
         }
         MessageType::Result => todo!(),
         MessageType::Ack => todo!(),
-        MessageType::Error => Ok("ERROR".to_string()),
-        MessageType::Ping => Ok("PONG".to_string()),
+        MessageType::Error => todo!(),
+        MessageType::Ping => {
+            let message_response =
+                Message::new(MessageType::Pong, 0, message_request.random_id, "");
+            Ok(message_response)
+        }
         MessageType::Pong => todo!(),
     }
 }
@@ -204,8 +214,12 @@ async fn handle_connection(
             let response = {
                 let mut registry = registry_clone.lock().unwrap();
                 match process_message(&raw_message, &mut registry) {
-                    Ok(response) => response,
-                    Err(e) => format!("Error processing message: {}", e),
+                    Ok(response) => response.to_string(),
+                    Err(e) => {
+                        let error_string = e.to_string();
+                        Message::new(MessageType::Error, 0, raw_message.random_id, &error_string)
+                            .to_string()
+                    }
                 }
             };
 
@@ -250,7 +264,7 @@ mod tests {
     #[test]
     fn test_process_message_ping() {
         // Create test message and registry
-        let message_str = "PING|0|0|0|";
+        let message_str = "PING|0||0|";
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
 
@@ -258,7 +272,7 @@ mod tests {
         let response = process_message(&raw_message, &mut registry).unwrap();
 
         // Verify response
-        assert_eq!(response, "PONG");
+        assert_eq!(response.to_string(), "PONG|0||0|");
     }
 
     #[test]
@@ -272,7 +286,9 @@ mod tests {
         let response = process_message(&raw_message, &mut registry).unwrap();
 
         // Verify response
-        assert_eq!(response, "RESULT:subscribed");
+        assert_eq!(response.to_string(), "RESULT|0|1|10|subscribed");
+
+        // TODO verify the send to subscribers
     }
 
     #[test]
@@ -283,9 +299,9 @@ mod tests {
         let mut registry = TopicRegistry::new();
 
         // Process the message
-        let response = process_message(&raw_message, &mut registry).unwrap();
+        let err = process_message(&raw_message, &mut registry).unwrap_err();
 
         // Verify response
-        assert_eq!(response, "Error: Empty topic name");
+        assert_eq!(err.to_string(), "Missing topic");
     }
 }

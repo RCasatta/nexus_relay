@@ -8,7 +8,7 @@ use lwk_wollet::{LiquidexProposal, Unvalidated, Validated};
 pub(crate) struct Message<'a> {
     pub(crate) type_: MessageType,
     pub(crate) version: u8,
-    pub(crate) random_id: u64,
+    pub(crate) random_id: Option<u64>,
     pub(crate) content: &'a str,
 }
 
@@ -22,6 +22,21 @@ pub enum MessageType {
     Error,
     Ping,
     Pong,
+}
+
+impl fmt::Display for MessageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MessageType::Publish => write!(f, "PUBLISH"),
+            MessageType::PublishProposal => write!(f, "PUBLISH_PROPOSAL"),
+            MessageType::Subscribe => write!(f, "SUBSCRIBE"),
+            MessageType::Result => write!(f, "RESULT"),
+            MessageType::Ack => write!(f, "ACK"),
+            MessageType::Error => write!(f, "ERROR"),
+            MessageType::Ping => write!(f, "PING"),
+            MessageType::Pong => write!(f, "PONG"),
+        }
+    }
 }
 
 impl FromStr for MessageType {
@@ -51,6 +66,7 @@ pub enum Error {
     InvalidLength(String),
     ContentLengthMismatch { expected: u64, actual: u64 },
     MissingTopic,
+    InvalidTopic,
     MissingContent,
     InvalidProposal,
 }
@@ -71,7 +87,23 @@ impl fmt::Display for Error {
             Error::MissingTopic => write!(f, "Missing topic"),
             Error::MissingContent => write!(f, "Missing content"),
             Error::InvalidProposal => write!(f, "Invalid proposal"),
+            Error::InvalidTopic => write!(f, "Invalid topic"),
         }
+    }
+}
+
+impl<'a> fmt::Display for Message<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let length = self.content.len() as u64;
+        let random_id = match self.random_id {
+            Some(id) => id.to_string(),
+            None => "".to_string(),
+        };
+        write!(
+            f,
+            "{}|{}|{}|{}|{}",
+            self.type_, self.version, random_id, length, self.content
+        )
     }
 }
 
@@ -87,6 +119,16 @@ impl From<std::num::ParseIntError> for Error {
 
 // Custom parser instead of implementing FromStr directly to avoid lifetime issues
 impl<'a> Message<'a> {
+
+    pub fn new(type_: MessageType, version: u8, random_id: Option<u64>, content: &'a str) -> Self {
+        Message {
+            type_,
+            version,
+            random_id,
+            content,
+        }
+    }
+
     pub fn parse(s: &'a str) -> Result<Self, Error> {
         let mut parts = s.splitn(5, '|');
 
@@ -102,9 +144,15 @@ impl<'a> Message<'a> {
         }
 
         let random_id_str = parts.next().ok_or(Error::MissingField)?;
-        let random_id = random_id_str
-            .parse::<u64>()
-            .map_err(|_| Error::InvalidRandomId(random_id_str.to_string()))?;
+        let random_id = if random_id_str.is_empty() {
+            None
+        } else {
+            Some(
+                random_id_str
+                    .parse::<u64>()
+                    .map_err(|_| Error::InvalidRandomId(random_id_str.to_string()))?,
+            )
+        };
 
         let length_str = parts.next().ok_or(Error::MissingField)?;
         let length = length_str
@@ -139,7 +187,7 @@ impl<'a> Message<'a> {
             return Err(Error::MissingTopic);
         }
         let content = parts.next().ok_or(Error::MissingContent)?;
-        
+
         Ok((topic, content))
     }
 
@@ -149,10 +197,8 @@ impl<'a> Message<'a> {
 }
 
 pub fn proposal_topic(proposal: &LiquidexProposal<Validated>) -> Result<String, Error> {
-
-    let topic = format!("{}~{}", proposal.input().asset, proposal.output().asset);
+    let topic = format!("{}|{}", proposal.input().asset, proposal.output().asset);
     Ok(topic)
-
 }
 
 #[cfg(test)]
@@ -165,67 +211,66 @@ mod tests {
 
     #[test]
     fn test_from_str() {
-        let message =
-            Message::parse("PUBLISH|0|12345|25|topic|{\"message\":\"hello\"}").unwrap();
+        let message = Message::parse("PUBLISH|0|12345|25|topic|{\"message\":\"hello\"}").unwrap();
         assert_eq!(message.type_, MessageType::Publish);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 12345);
+        assert_eq!(message.random_id, Some(12345));
         assert_eq!(message.content, "topic|{\"message\":\"hello\"}");
 
         // Generic publish
         let message = Message::parse("PUBLISH|0|1|25|topic|{\"message\":\"hello\"}").unwrap();
         assert_eq!(message.type_, MessageType::Publish);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 1);
+        assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "topic|{\"message\":\"hello\"}");
 
         // Publish proposal (with placeholder content)
         let message = Message::parse("PUBLISH_PROPOSAL|0|1|9|$PROPOSAL").unwrap();
         assert_eq!(message.type_, MessageType::PublishProposal);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 1);
+        assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "$PROPOSAL");
 
         // Response - RESULT
         let message = Message::parse("RESULT|0|1|22|{\"response\":\"success\"}").unwrap();
         assert_eq!(message.type_, MessageType::Result);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 1);
+        assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "{\"response\":\"success\"}");
 
         // Response - ACK
-        let message = Message::parse("ACK|0|12345|0|").unwrap();
+        let message = Message::parse("ACK|0||0|").unwrap();
         assert_eq!(message.type_, MessageType::Ack);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 12345);
+        assert_eq!(message.random_id, None);
         assert_eq!(message.content, "");
 
         // Ping
-        let message = Message::parse("PING|0|0|0|").unwrap();
+        let message = Message::parse("PING|0||0|").unwrap();
         assert_eq!(message.type_, MessageType::Ping);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 0);
+        assert_eq!(message.random_id, None);
         assert_eq!(message.content, "");
 
         // Pong
-        let message = Message::parse("PONG|0|0|0|").unwrap();
+        let message = Message::parse("PONG|0||0|").unwrap();
         assert_eq!(message.type_, MessageType::Pong);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 0);
+        assert_eq!(message.random_id, None);
         assert_eq!(message.content, "");
 
         // Error
         let message = Message::parse("ERROR|0|1|12|InvalidTopic").unwrap();
         assert_eq!(message.type_, MessageType::Error);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 1);
+        assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "InvalidTopic");
 
         // Subscribe
         let message = Message::parse("SUBSCRIBE|0|1|8|mytopic1").unwrap();
         assert_eq!(message.type_, MessageType::Subscribe);
         assert_eq!(message.version, 0);
-        assert_eq!(message.random_id, 1);
+        assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "mytopic1");
     }
 
@@ -273,8 +318,7 @@ mod tests {
     #[test]
     fn test_topic_content() {
         // Test valid topic and content
-        let message =
-            Message::parse("PUBLISH|0|12345|25|topic|{\"message\":\"hello\"}").unwrap();
+        let message = Message::parse("PUBLISH|0|12345|25|topic|{\"message\":\"hello\"}").unwrap();
         let (topic, content) = message.topic_content().unwrap();
         assert_eq!(topic, "topic");
         assert_eq!(content, "{\"message\":\"hello\"}");
@@ -316,6 +360,6 @@ mod tests {
         let proposal = message.proposal().unwrap();
         let validated = proposal.insecure_validate().unwrap();
         let topic = proposal_topic(&validated).unwrap();
-        assert_eq!(topic, "6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7~f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28");
+        assert_eq!(topic, "6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7|f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28");
     }
 }
