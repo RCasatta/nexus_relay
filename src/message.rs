@@ -48,18 +48,18 @@ impl FromStr for MessageType {
             "ERROR" => Ok(MessageType::Error),
             "PING" => Ok(MessageType::Ping),
             "PONG" => Ok(MessageType::Pong),
-            _ => Err(Error::InvalidMessageType(s.to_string())),
+            _ => Err(Error::InvalidMessage),
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Error {
-    InvalidMessageType(String),
+    InvalidMessage,
     MissingField,
-    InvalidVersion(String),
-    InvalidRandomId(String),
-    InvalidLength(String),
+    InvalidVersion,
+    InvalidRandomId,
+    InvalidLength,
     ContentLengthMismatch { expected: u64, actual: u64 },
     MissingTopic,
     InvalidTopic,
@@ -71,11 +71,11 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::InvalidMessageType(s) => write!(f, "Invalid message type: {}", s),
+            Error::InvalidMessage => write!(f, "Invalid message type"),
             Error::MissingField => write!(f, "Missing message field"),
-            Error::InvalidVersion(s) => write!(f, "Invalid message version: {}", s),
-            Error::InvalidRandomId(s) => write!(f, "Invalid random ID: {}", s),
-            Error::InvalidLength(s) => write!(f, "Invalid length: {}", s),
+            Error::InvalidVersion => write!(f, "Invalid message version"),
+            Error::InvalidRandomId => write!(f, "Invalid random ID"),
+            Error::InvalidLength => write!(f, "Invalid length"),
             Error::ContentLengthMismatch { expected, actual } => write!(
                 f,
                 "Content length mismatch: expected {}, got {}",
@@ -133,7 +133,7 @@ impl<'a> Message<'a> {
 
         let version_str = parts.next().ok_or(Error::MissingField)?;
         if !version_str.is_empty() {
-            return Err(Error::InvalidVersion(version_str.to_string()));
+            return Err(Error::InvalidVersion);
         }
 
         let random_id_str = parts.next().ok_or(Error::MissingField)?;
@@ -143,14 +143,14 @@ impl<'a> Message<'a> {
             Some(
                 random_id_str
                     .parse::<u64>()
-                    .map_err(|_| Error::InvalidRandomId(random_id_str.to_string()))?,
+                    .map_err(|_| Error::InvalidRandomId)?,
             )
         };
 
         let length_str = parts.next().ok_or(Error::MissingField)?;
         let length = length_str
             .parse::<u64>()
-            .map_err(|_| Error::InvalidLength(length_str.to_string()))?;
+            .map_err(|_| Error::InvalidLength)?;
 
         let content = parts.next().ok_or(Error::MissingField)?;
 
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn test_error_invalid_message_type() {
         let result = Message::parse("UNKNOWN||12345|0|");
-        assert!(matches!(result, Err(Error::InvalidMessageType(s)) if s == "UNKNOWN"));
+        assert!(matches!(result, Err(Error::InvalidMessage)));
     }
 
     #[test]
@@ -280,21 +280,21 @@ mod tests {
     #[test]
     fn test_error_invalid_version() {
         let result = Message::parse("PUBLISH|invalid|12345|0|");
-        assert!(matches!(result, Err(Error::InvalidVersion(s)) if s == "invalid"));
+        assert!(matches!(result, Err(Error::InvalidVersion)));
         let result = Message::parse("PUBLISH|1|12345|0|");
-        assert!(matches!(result, Err(Error::InvalidVersion(s)) if s == "1"));
+        assert!(matches!(result, Err(Error::InvalidVersion)));
     }
 
     #[test]
     fn test_error_invalid_random_id() {
         let result = Message::parse("PUBLISH||invalid|0|");
-        assert!(matches!(result, Err(Error::InvalidRandomId(s)) if s == "invalid"));
+        assert!(matches!(result, Err(Error::InvalidRandomId)));
     }
 
     #[test]
     fn test_error_invalid_length() {
         let result = Message::parse("PUBLISH||12345|invalid|");
-        assert!(matches!(result, Err(Error::InvalidLength(s)) if s == "invalid"));
+        assert!(matches!(result, Err(Error::InvalidLength)));
     }
 
     #[test]
