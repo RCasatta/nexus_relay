@@ -326,7 +326,7 @@ mod tests {
     }
 
     #[test]
-    fn test_subscribe() {
+    fn test_subscribe_publish() {
         let id1 = 12341234;
         let id2 = 12341235;
         let proposal_json = proposal_str();
