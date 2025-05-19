@@ -116,13 +116,13 @@ fn process_message<'a>(
             let proposal = proposal.insecure_validate()?;
             let topic = format!("{}:{}", proposal.input().asset, proposal.output().asset);
             let content = format!("{}", proposal);
-            let message_to_subscriber = Message::new(MessageType::Result, 0, None, &content);
+            let message_to_subscriber = Message::new(MessageType::Result, None, &content);
             let sent_count = registry.publish(&topic, message_to_subscriber);
             println!(
                 "Message sent to {} subscribers on topic: {}",
                 sent_count, topic
             );
-            let message_response = Message::new(MessageType::Ack, 0, message_request.random_id, "");
+            let message_response = Message::new(MessageType::Ack, message_request.random_id, "");
             Ok(message_response)
         }
         MessageType::Subscribe => {
@@ -132,12 +132,8 @@ fn process_message<'a>(
             } else if topic.len() > 64 {
                 Err(Box::new(Error::InvalidTopic))
             } else {
-                let message_response = Message::new(
-                    MessageType::Result,
-                    0,
-                    message_request.random_id,
-                    "subscribed",
-                );
+                let message_response =
+                    Message::new(MessageType::Result, message_request.random_id, "subscribed");
                 Ok(message_response)
             }
         }
@@ -145,8 +141,7 @@ fn process_message<'a>(
         MessageType::Ack => todo!(),
         MessageType::Error => todo!(),
         MessageType::Ping => {
-            let message_response =
-                Message::new(MessageType::Pong, 0, message_request.random_id, "");
+            let message_response = Message::new(MessageType::Pong, message_request.random_id, "");
             Ok(message_response)
         }
         MessageType::Pong => todo!(),
@@ -201,7 +196,7 @@ async fn handle_connection(
                 Ok(msg) => msg,
                 Err(e) => {
                     let error_string = e.to_string();
-                    let message_response = Message::new(MessageType::Error, 0, None, &error_string);
+                    let message_response = Message::new(MessageType::Error, None, &error_string);
                     if client_tx_clone.send(message_response.to_string()).is_err() {
                         break;
                     }
@@ -216,7 +211,7 @@ async fn handle_connection(
                     Ok(response) => response.to_string(),
                     Err(e) => {
                         let error_string = e.to_string();
-                        Message::new(MessageType::Error, 0, raw_message.random_id, &error_string)
+                        Message::new(MessageType::Error, raw_message.random_id, &error_string)
                             .to_string()
                     }
                 }
@@ -268,13 +263,8 @@ mod tests {
             Ok(response) => response.to_string(),
             Err(e) => {
                 let error_string = e.to_string();
-                Message::new(
-                    MessageType::Error,
-                    0,
-                    message_request.random_id,
-                    &error_string,
-                )
-                .to_string()
+                Message::new(MessageType::Error, message_request.random_id, &error_string)
+                    .to_string()
             }
         }
     }
@@ -288,7 +278,7 @@ mod tests {
     #[test]
     fn test_process_message_ping() {
         // Create test message and registry
-        let message_str = "PING|0||0|";
+        let message_str = "PING|||0|";
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
 
@@ -296,13 +286,13 @@ mod tests {
         let response = process_message(&raw_message, &mut registry).unwrap();
 
         // Verify response
-        assert_eq!(response.to_string(), "PONG|0||0|");
+        assert_eq!(response.to_string(), "PONG|||0|");
     }
 
     #[test]
     fn test_process_message_subscribe() {
         // Create test message with a topic
-        let message_str = "SUBSCRIBE|0|1|6|topic1";
+        let message_str = "SUBSCRIBE||1|6|topic1";
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
 
@@ -310,7 +300,7 @@ mod tests {
         let response = process_message(&raw_message, &mut registry).unwrap();
 
         // Verify response
-        assert_eq!(response.to_string(), "RESULT|0|1|10|subscribed");
+        assert_eq!(response.to_string(), "RESULT||1|10|subscribed");
 
         // TODO verify the send to subscribers
     }
@@ -318,7 +308,7 @@ mod tests {
     #[test]
     fn test_process_message_subscribe_empty_topic() {
         // Create test message with empty topic
-        let message_str = "SUBSCRIBE|0|1|0|";
+        let message_str = "SUBSCRIBE||1|0|";
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
 
@@ -326,6 +316,6 @@ mod tests {
         let err = process_message_test(&raw_message, &mut registry);
 
         // Verify response
-        assert_eq!(err.to_string(), "ERROR|0|1|13|Missing topic");
+        assert_eq!(err.to_string(), "ERROR||1|13|Missing topic");
     }
 }

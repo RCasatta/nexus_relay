@@ -7,7 +7,6 @@ use lwk_wollet::{LiquidexProposal, Unvalidated, Validated};
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct Message<'a> {
     pub(crate) type_: MessageType,
-    pub(crate) version: u8,
     pub(crate) random_id: Option<u64>,
     pub(crate) content: &'a str,
 }
@@ -101,8 +100,8 @@ impl<'a> fmt::Display for Message<'a> {
         };
         write!(
             f,
-            "{}|{}|{}|{}|{}",
-            self.type_, self.version, random_id, length, self.content
+            "{}||{}|{}|{}",
+            self.type_, random_id, length, self.content
         )
     }
 }
@@ -119,10 +118,9 @@ impl From<std::num::ParseIntError> for Error {
 
 // Custom parser instead of implementing FromStr directly to avoid lifetime issues
 impl<'a> Message<'a> {
-    pub fn new(type_: MessageType, version: u8, random_id: Option<u64>, content: &'a str) -> Self {
+    pub fn new(type_: MessageType, random_id: Option<u64>, content: &'a str) -> Self {
         Message {
             type_,
-            version,
             random_id,
             content,
         }
@@ -135,10 +133,7 @@ impl<'a> Message<'a> {
         let type_ = type_str.parse::<MessageType>()?;
 
         let version_str = parts.next().ok_or(Error::MissingField)?;
-        let version = version_str
-            .parse::<u8>()
-            .map_err(|_| Error::InvalidVersion(version_str.to_string()))?;
-        if version != 0 {
+        if !version_str.is_empty() {
             return Err(Error::InvalidVersion(version_str.to_string()));
         }
 
@@ -171,7 +166,6 @@ impl<'a> Message<'a> {
 
         Ok(Message {
             type_,
-            version,
             random_id,
             content,
         })
@@ -212,78 +206,69 @@ mod tests {
 
     #[test]
     fn test_from_str() {
-        let message = Message::parse("PUBLISH|0|12345|25|topic|{\"message\":\"hello\"}").unwrap();
+        let message = Message::parse("PUBLISH||12345|25|topic|{\"message\":\"hello\"}").unwrap();
         assert_eq!(message.type_, MessageType::Publish);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, Some(12345));
         assert_eq!(message.content, "topic|{\"message\":\"hello\"}");
 
         // Generic publish
-        let message = Message::parse("PUBLISH|0|1|25|topic|{\"message\":\"hello\"}").unwrap();
+        let message = Message::parse("PUBLISH||1|25|topic|{\"message\":\"hello\"}").unwrap();
         assert_eq!(message.type_, MessageType::Publish);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "topic|{\"message\":\"hello\"}");
 
         // Publish proposal (with placeholder content)
-        let message = Message::parse("PUBLISH_PROPOSAL|0|1|9|$PROPOSAL").unwrap();
+        let message = Message::parse("PUBLISH_PROPOSAL||1|9|$PROPOSAL").unwrap();
         assert_eq!(message.type_, MessageType::PublishProposal);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "$PROPOSAL");
 
         // Response - RESULT
-        let message = Message::parse("RESULT|0|1|22|{\"response\":\"success\"}").unwrap();
+        let message = Message::parse("RESULT||1|22|{\"response\":\"success\"}").unwrap();
         assert_eq!(message.type_, MessageType::Result);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "{\"response\":\"success\"}");
 
         // Response - ACK
-        let message = Message::parse("ACK|0||0|").unwrap();
+        let message = Message::parse("ACK|||0|").unwrap();
         assert_eq!(message.type_, MessageType::Ack);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, None);
         assert_eq!(message.content, "");
 
         // Ping
-        let message = Message::parse("PING|0||0|").unwrap();
+        let message = Message::parse("PING|||0|").unwrap();
         assert_eq!(message.type_, MessageType::Ping);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, None);
         assert_eq!(message.content, "");
 
         // Pong
-        let message = Message::parse("PONG|0||0|").unwrap();
+        let message = Message::parse("PONG|||0|").unwrap();
         assert_eq!(message.type_, MessageType::Pong);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, None);
         assert_eq!(message.content, "");
 
         // Error
-        let message = Message::parse("ERROR|0|1|12|InvalidTopic").unwrap();
+        let message = Message::parse("ERROR||1|12|InvalidTopic").unwrap();
         assert_eq!(message.type_, MessageType::Error);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "InvalidTopic");
 
         // Subscribe
-        let message = Message::parse("SUBSCRIBE|0|1|8|mytopic1").unwrap();
+        let message = Message::parse("SUBSCRIBE||1|8|mytopic1").unwrap();
         assert_eq!(message.type_, MessageType::Subscribe);
-        assert_eq!(message.version, 0);
         assert_eq!(message.random_id, Some(1));
         assert_eq!(message.content, "mytopic1");
     }
 
     #[test]
     fn test_error_invalid_message_type() {
-        let result = Message::parse("UNKNOWN|0|12345|0|");
+        let result = Message::parse("UNKNOWN||12345|0|");
         assert!(matches!(result, Err(Error::InvalidMessageType(s)) if s == "UNKNOWN"));
     }
 
     #[test]
     fn test_error_missing_field() {
-        let result = Message::parse("PUBLISH|0|12345");
+        let result = Message::parse("PUBLISH||12345");
         assert_eq!(result, Err(Error::MissingField));
     }
 
@@ -297,19 +282,19 @@ mod tests {
 
     #[test]
     fn test_error_invalid_random_id() {
-        let result = Message::parse("PUBLISH|0|invalid|0|");
+        let result = Message::parse("PUBLISH||invalid|0|");
         assert!(matches!(result, Err(Error::InvalidRandomId(s)) if s == "invalid"));
     }
 
     #[test]
     fn test_error_invalid_length() {
-        let result = Message::parse("PUBLISH|0|12345|invalid|");
+        let result = Message::parse("PUBLISH||12345|invalid|");
         assert!(matches!(result, Err(Error::InvalidLength(s)) if s == "invalid"));
     }
 
     #[test]
     fn test_error_content_length_mismatch() {
-        let result = Message::parse("PUBLISH|0|12345|10|content");
+        let result = Message::parse("PUBLISH||12345|10|content");
         assert!(
             matches!(result, Err(Error::ContentLengthMismatch { expected, actual }) 
             if expected == 10 && actual == 7)
@@ -319,23 +304,23 @@ mod tests {
     #[test]
     fn test_topic_content() {
         // Test valid topic and content
-        let message = Message::parse("PUBLISH|0|12345|25|topic|{\"message\":\"hello\"}").unwrap();
+        let message = Message::parse("PUBLISH||12345|25|topic|{\"message\":\"hello\"}").unwrap();
         let (topic, content) = message.topic_content().unwrap();
         assert_eq!(topic, "topic");
         assert_eq!(content, "{\"message\":\"hello\"}");
 
         // Test with empty content
-        let message = Message::parse("PUBLISH|0|12345|6|topic|").unwrap();
+        let message = Message::parse("PUBLISH||12345|6|topic|").unwrap();
         let (topic, content) = message.topic_content().unwrap();
         assert_eq!(topic, "topic");
         assert_eq!(content, "");
 
         // Test with missing content
-        let message = Message::parse("PUBLISH|0|12345|5|topic").unwrap();
+        let message = Message::parse("PUBLISH||12345|5|topic").unwrap();
         assert_eq!(message.topic_content(), Err(Error::MissingContent));
 
         // Test with missing topic
-        let message = Message::parse("PUBLISH|0|12345|0|").unwrap();
+        let message = Message::parse("PUBLISH||12345|0|").unwrap();
         assert_eq!(message.topic_content(), Err(Error::MissingTopic));
     }
 
@@ -343,20 +328,20 @@ mod tests {
     fn test_proposal() {
         // Test valid proposal
         let proposal_json = proposal_str();
-        let message = format!("PUBLISH|0|12345|{}|{}", proposal_json.len(), proposal_json);
+        let message = format!("PUBLISH||12345|{}|{}", proposal_json.len(), proposal_json);
         let message = Message::parse(&message).unwrap();
         let proposal = message.proposal().unwrap();
         assert!(matches!(proposal, LiquidexProposal::<Unvalidated> { .. }));
 
         // Test invalid proposal
-        let message = Message::parse("PUBLISH|0|12345|12|invalid_json").unwrap();
+        let message = Message::parse("PUBLISH||12345|12|invalid_json").unwrap();
         assert_eq!(message.proposal(), Err(Error::InvalidProposal));
     }
 
     #[test]
     fn test_proposal_topic() {
         let proposal_json = proposal_str();
-        let message = format!("PUBLISH|0|12345|{}|{}", proposal_json.len(), proposal_json);
+        let message = format!("PUBLISH||12345|{}|{}", proposal_json.len(), proposal_json);
         let message = Message::parse(&message).unwrap();
         let proposal = message.proposal().unwrap();
         let validated = proposal.insecure_validate().unwrap();
