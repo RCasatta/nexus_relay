@@ -1,11 +1,8 @@
+use futures_util::{SinkExt, StreamExt};
+use message::{proposal_topic, Error, Message, MessageType};
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-
-use futures_util::{SinkExt, StreamExt};
-use lwk_wollet::LiquidexProposal;
-use message::{Error, Message, MessageType};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as TokioMessage;
@@ -106,45 +103,63 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 fn process_message<'a>(
     message_request: &'a Message<'a>,
     registry: &mut TopicRegistry,
+    client_tx_clone: &mpsc::UnboundedSender<String>,
 ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
     match message_request.type_ {
         MessageType::Publish => {
-            todo!()
-        }
-        MessageType::PublishProposal => {
-            let proposal = LiquidexProposal::from_str(message_request.content)?;
-            let proposal = proposal.insecure_validate()?;
-            let topic = format!("{}:{}", proposal.input().asset, proposal.output().asset);
-            let content = format!("{}", proposal);
+            let (topic, content) = message_request.topic_content()?;
             let message_to_subscriber = Message::new(MessageType::Result, None, &content);
             let sent_count = registry.publish(&topic, message_to_subscriber);
             println!(
                 "Message sent to {} subscribers on topic: {}",
                 sent_count, topic
             );
-            let message_response = Message::new(MessageType::Ack, message_request.random_id, "");
+            let message_response = Message::new(
+                MessageType::Result,
+                message_request.random_id,
+                "message published",
+            );
+            Ok(message_response)
+        }
+        MessageType::PublishProposal => {
+            let proposal = message_request.proposal()?;
+            let proposal = proposal.insecure_validate()?; // TODO: validate properly
+            let topic = proposal_topic(&proposal)?;
+            let proposal_str = format!("{}", proposal);
+            let message_to_subscriber = Message::new(MessageType::Result, None, &proposal_str);
+            let sent_count = registry.publish(&topic, message_to_subscriber);
+            println!(
+                "Message sent to {} subscribers on topic: {}",
+                sent_count, topic
+            );
+            let message_response = Message::new(
+                MessageType::Result,
+                message_request.random_id,
+                "proposal published",
+            );
             Ok(message_response)
         }
         MessageType::Subscribe => {
-            let topic = message_request.content();
+            let topic = message_request.content().to_string();
             if topic.is_empty() {
                 Err(Box::new(Error::MissingTopic))
-            } else if topic.len() > 64 {
+            } else if topic.len() > 129 {
+                // TODO: handle proposal topic, error for other cases longer than 64 chars
                 Err(Box::new(Error::InvalidTopic))
             } else {
+                registry.subscribe(topic, client_tx_clone.clone());
                 let message_response =
                     Message::new(MessageType::Result, message_request.random_id, "subscribed");
                 Ok(message_response)
             }
         }
-        MessageType::Result => todo!(),
-        MessageType::Ack => todo!(),
-        MessageType::Error => todo!(),
+        MessageType::Result => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
+        MessageType::Error => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
         MessageType::Ping => {
             let message_response = Message::new(MessageType::Pong, message_request.random_id, "");
             Ok(message_response)
         }
-        MessageType::Pong => todo!(),
+        MessageType::Pong => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
     }
 }
 
@@ -178,9 +193,6 @@ async fn handle_connection(
         }
     });
 
-    // Create a collection of topics this client has subscribed to
-    let mut client_topics = Vec::new();
-
     // Process incoming WebSocket messages
     while let Some(result) = ws_rx.next().await {
         let msg = match result {
@@ -207,7 +219,7 @@ async fn handle_connection(
             // Process the message and get response
             let response = {
                 let mut registry = registry_clone.lock().unwrap();
-                match process_message(&raw_message, &mut registry) {
+                match process_message(&raw_message, &mut registry, &client_tx_clone) {
                     Ok(response) => response.to_string(),
                     Err(e) => {
                         let error_string = e.to_string();
@@ -216,21 +228,6 @@ async fn handle_connection(
                     }
                 }
             };
-
-            // For subscription messages, update client's topics
-            if raw_message.type_ == MessageType::Subscribe && !raw_message.content.is_empty() {
-                let topic = raw_message.content.to_string();
-                println!("Client {} subscribing to topic: {}", addr, topic);
-
-                // Add to client's topic list
-                client_topics.push(topic.clone());
-
-                // Add client to the topic registry
-                {
-                    let mut registry = registry_clone.lock().unwrap();
-                    registry.subscribe(topic, client_tx_clone.clone());
-                }
-            }
 
             // Send response back to client
             if client_tx_clone.send(response).is_err() {
@@ -259,7 +256,9 @@ mod tests {
         message_request: &'a Message<'a>,
         registry: &mut TopicRegistry,
     ) -> String {
-        match process_message(message_request, registry) {
+        let (client_tx, _client_rx) = mpsc::unbounded_channel();
+
+        match process_message(message_request, registry, &client_tx) {
             Ok(response) => response.to_string(),
             Err(e) => {
                 let error_string = e.to_string();
@@ -281,9 +280,10 @@ mod tests {
         let message_str = "PING|||0|";
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
+        let (client_tx, _client_rx) = mpsc::unbounded_channel();
 
         // Process the message
-        let response = process_message(&raw_message, &mut registry).unwrap();
+        let response = process_message(&raw_message, &mut registry, &client_tx).unwrap();
 
         // Verify response
         assert_eq!(response.to_string(), "PONG|||0|");
@@ -295,9 +295,10 @@ mod tests {
         let message_str = "SUBSCRIBE||1|6|topic1";
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
+        let (client_tx, _client_rx) = mpsc::unbounded_channel();
 
         // Process the message
-        let response = process_message(&raw_message, &mut registry).unwrap();
+        let response = process_message(&raw_message, &mut registry, &client_tx).unwrap();
 
         // Verify response
         assert_eq!(response.to_string(), "RESULT||1|10|subscribed");

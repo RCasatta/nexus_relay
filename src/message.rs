@@ -17,7 +17,6 @@ pub enum MessageType {
     PublishProposal,
     Subscribe,
     Result,
-    Ack,
     Error,
     Ping,
     Pong,
@@ -30,7 +29,6 @@ impl fmt::Display for MessageType {
             MessageType::PublishProposal => write!(f, "PUBLISH_PROPOSAL"),
             MessageType::Subscribe => write!(f, "SUBSCRIBE"),
             MessageType::Result => write!(f, "RESULT"),
-            MessageType::Ack => write!(f, "ACK"),
             MessageType::Error => write!(f, "ERROR"),
             MessageType::Ping => write!(f, "PING"),
             MessageType::Pong => write!(f, "PONG"),
@@ -47,7 +45,6 @@ impl FromStr for MessageType {
             "PUBLISH_PROPOSAL" => Ok(MessageType::PublishProposal),
             "SUBSCRIBE" => Ok(MessageType::Subscribe),
             "RESULT" => Ok(MessageType::Result),
-            "ACK" => Ok(MessageType::Ack),
             "ERROR" => Ok(MessageType::Error),
             "PING" => Ok(MessageType::Ping),
             "PONG" => Ok(MessageType::Pong),
@@ -68,6 +65,7 @@ pub enum Error {
     InvalidTopic,
     MissingContent,
     InvalidProposal,
+    ResponseMessageUsedAsRequest,
 }
 
 impl fmt::Display for Error {
@@ -87,6 +85,7 @@ impl fmt::Display for Error {
             Error::MissingContent => write!(f, "Missing content"),
             Error::InvalidProposal => write!(f, "Invalid proposal"),
             Error::InvalidTopic => write!(f, "Invalid topic"),
+            Error::ResponseMessageUsedAsRequest => write!(f, "Response message used as request"),
         }
     }
 }
@@ -154,9 +153,15 @@ impl<'a> Message<'a> {
             .map_err(|_| Error::InvalidLength(length_str.to_string()))?;
 
         let content = parts.next().ok_or(Error::MissingField)?;
-        let actual_length = content
-            .trim() // TODO: This is helpful for testing with websocat, but can this cause problems?
-            .len() as u64;
+
+        // Special handling for trailing newlines in content
+        let (actual_content, actual_length) = if content.ends_with('\n') {
+            let trimmed = content.trim_end_matches('\n');
+            (trimmed, trimmed.len() as u64)
+        } else {
+            (content, content.len() as u64)
+        };
+
         if actual_length != length {
             return Err(Error::ContentLengthMismatch {
                 expected: length,
@@ -167,7 +172,7 @@ impl<'a> Message<'a> {
         Ok(Message {
             type_,
             random_id,
-            content,
+            content: actual_content,
         })
     }
 
@@ -230,8 +235,8 @@ mod tests {
         assert_eq!(message.content, "{\"response\":\"success\"}");
 
         // Response - ACK
-        let message = Message::parse("ACK|||0|").unwrap();
-        assert_eq!(message.type_, MessageType::Ack);
+        let message = Message::parse("RESULT|||0|").unwrap();
+        assert_eq!(message.type_, MessageType::Result);
         assert_eq!(message.random_id, None);
         assert_eq!(message.content, "");
 
@@ -294,11 +299,24 @@ mod tests {
 
     #[test]
     fn test_error_content_length_mismatch() {
+        // Test with content shorter than expected length
         let result = Message::parse("PUBLISH||12345|10|content");
         assert!(
-            matches!(result, Err(Error::ContentLengthMismatch { expected, actual }) 
+            matches!(result, Err(Error::ContentLengthMismatch { expected, actual })
             if expected == 10 && actual == 7)
         );
+
+        // Test with content longer than expected length (not due to trailing newlines)
+        let result = Message::parse("PUBLISH||12345|7|content-too-long");
+        assert!(
+            matches!(result, Err(Error::ContentLengthMismatch { expected, actual })
+            if expected == 7 && actual == 16)
+        );
+
+        // Test that trailing newlines are properly handled
+        let result = Message::parse("PUBLISH||12345|7|content\n");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().content, "content");
     }
 
     #[test]
