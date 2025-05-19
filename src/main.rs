@@ -6,10 +6,10 @@ use std::sync::{Arc, Mutex};
 use futures_util::{SinkExt, StreamExt};
 use lwk_wollet::elements::AssetId;
 use lwk_wollet::{LiquidexProposal, Validated};
-use message::{MessageType, RawMessage};
+use message::{Message, MessageType};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::Message as TokioMessage;
 
 mod message;
 
@@ -105,7 +105,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 
 // Process a message and return the response to send back to the client
 fn process_message<'a>(
-    raw_message: &'a RawMessage<'a>,
+    raw_message: &'a Message<'a>,
     registry: &mut TopicRegistry,
 ) -> Result<String, Box<dyn std::error::Error>> {
     match raw_message.type_ {
@@ -167,7 +167,7 @@ async fn handle_connection(
     // Spawn task for forwarding messages from client_rx to WebSocket
     let forward_task = tokio::spawn(async move {
         while let Some(msg) = client_rx.recv().await {
-            if ws_tx.send(Message::Text(msg)).await.is_err() {
+            if ws_tx.send(TokioMessage::Text(msg)).await.is_err() {
                 break;
             }
         }
@@ -186,8 +186,8 @@ async fn handle_connection(
             }
         };
 
-        if let Message::Text(text) = msg {
-            let raw_message = match RawMessage::parse(&text) {
+        if let TokioMessage::Text(text) = msg {
+            let raw_message = match Message::parse(&text) {
                 Ok(msg) => msg,
                 Err(e) => {
                     if client_tx_clone
@@ -245,13 +245,13 @@ async fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{MessageType, RawMessage};
+    use crate::message::{Message, MessageType};
 
     #[test]
     fn test_process_message_ping() {
         // Create test message and registry
         let message_str = "PING|0|0|0|";
-        let raw_message = RawMessage::parse(message_str).unwrap();
+        let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
 
         // Process the message
@@ -265,7 +265,7 @@ mod tests {
     fn test_process_message_subscribe() {
         // Create test message with a topic
         let message_str = "SUBSCRIBE|0|1|6|topic1";
-        let raw_message = RawMessage::parse(message_str).unwrap();
+        let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
 
         // Process the message
@@ -279,7 +279,7 @@ mod tests {
     fn test_process_message_subscribe_empty_topic() {
         // Create test message with empty topic
         let message_str = "SUBSCRIBE|0|1|0|";
-        let raw_message = RawMessage::parse(message_str).unwrap();
+        let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
 
         // Process the message
