@@ -119,7 +119,6 @@ impl From<std::num::ParseIntError> for Error {
 
 // Custom parser instead of implementing FromStr directly to avoid lifetime issues
 impl<'a> Message<'a> {
-
     pub fn new(type_: MessageType, version: u8, random_id: Option<u64>, content: &'a str) -> Self {
         Message {
             type_,
@@ -160,7 +159,9 @@ impl<'a> Message<'a> {
             .map_err(|_| Error::InvalidLength(length_str.to_string()))?;
 
         let content = parts.next().ok_or(Error::MissingField)?;
-        let actual_length = content.len() as u64;
+        let actual_length = content
+            .trim() // TODO: This is helpful for testing with websocat, but can this cause problems?
+            .len() as u64;
         if actual_length != length {
             return Err(Error::ContentLengthMismatch {
                 expected: length,

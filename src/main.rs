@@ -200,10 +200,9 @@ async fn handle_connection(
             let raw_message = match Message::parse(&text) {
                 Ok(msg) => msg,
                 Err(e) => {
-                    if client_tx_clone
-                        .send(format!("Error parsing message: {}", e))
-                        .is_err()
-                    {
+                    let error_string = e.to_string();
+                    let message_response = Message::new(MessageType::Error, 0, None, &error_string);
+                    if client_tx_clone.send(message_response.to_string()).is_err() {
                         break;
                     }
                     continue;
@@ -261,6 +260,31 @@ mod tests {
     use super::*;
     use crate::message::{Message, MessageType};
 
+    fn process_message_test<'a>(
+        message_request: &'a Message<'a>,
+        registry: &mut TopicRegistry,
+    ) -> String {
+        match process_message(message_request, registry) {
+            Ok(response) => response.to_string(),
+            Err(e) => {
+                let error_string = e.to_string();
+                Message::new(
+                    MessageType::Error,
+                    0,
+                    message_request.random_id,
+                    &error_string,
+                )
+                .to_string()
+            }
+        }
+    }
+
+    #[test]
+    fn test_process_message_not_properly_formatted() {
+
+        // TODO refactor out a fn process_str_message() which takes a string and returns a Message so that this is unit testable
+    }
+
     #[test]
     fn test_process_message_ping() {
         // Create test message and registry
@@ -299,9 +323,9 @@ mod tests {
         let mut registry = TopicRegistry::new();
 
         // Process the message
-        let err = process_message(&raw_message, &mut registry).unwrap_err();
+        let err = process_message_test(&raw_message, &mut registry);
 
         // Verify response
-        assert_eq!(err.to_string(), "Missing topic");
+        assert_eq!(err.to_string(), "ERROR|0|1|13|Missing topic");
     }
 }
