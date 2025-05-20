@@ -295,7 +295,7 @@ mod tests {
     #[test]
     fn test_process_message_ping() {
         // Create test message and registry
-        let message_str = "PING|||0|";
+        let message_str = "PING||||";
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
         let (client_tx, _client_rx) = mpsc::unbounded_channel();
@@ -304,7 +304,7 @@ mod tests {
         let response = process_message(&raw_message, &mut registry, &client_tx).unwrap();
 
         // Verify response
-        assert_eq!(response.to_string(), "PONG|||0|");
+        assert_eq!(response.to_string(), "PONG||||");
     }
 
     #[test]

@@ -92,16 +92,17 @@ impl fmt::Display for Error {
 
 impl<'a> fmt::Display for Message<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}||", self.type_)?; // type and version
+        if let Some(random_id) = self.random_id {
+            write!(f, "{}", random_id)?;
+        }
+        write!(f, "|")?;
         let length = self.content.len() as u64;
-        let random_id = match self.random_id {
-            Some(id) => id.to_string(),
-            None => "".to_string(),
-        };
-        write!(
-            f,
-            "{}||{}|{}|{}",
-            self.type_, random_id, length, self.content
-        )
+        if length > 0 {
+            write!(f, "{}", length)?;
+        }
+        write!(f, "|")?;
+        write!(f, "{}", self.content)
     }
 }
 
