@@ -148,9 +148,13 @@ impl<'a> Message<'a> {
         };
 
         let length_str = parts.next().ok_or(Error::MissingField)?;
-        let length = length_str
-            .parse::<u64>()
-            .map_err(|_| Error::InvalidLength)?;
+        let length = if length_str.is_empty() {
+            0
+        } else {
+            length_str
+                .parse::<u64>()
+                .map_err(|_| Error::InvalidLength)?
+        };
 
         let content = parts.next().ok_or(Error::MissingField)?;
 
@@ -242,6 +246,11 @@ mod tests {
 
         // Ping
         let message = Message::parse("PING|||0|").unwrap();
+        assert_eq!(message.type_, MessageType::Ping);
+        assert_eq!(message.random_id, None);
+        assert_eq!(message.content, "");
+
+        let message = Message::parse("PING||||").unwrap();
         assert_eq!(message.type_, MessageType::Ping);
         assert_eq!(message.random_id, None);
         assert_eq!(message.content, "");

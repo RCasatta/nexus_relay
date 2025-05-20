@@ -49,7 +49,7 @@ The response from the server will include this same ID in the reply for linking 
 
 ### Length
 
-Contain the lenght of the following content. Use a decimal base instead of a more compact hexadecimal for human readability.
+Contain the lenght of the following content. Use a decimal base instead of a more compact hexadecimal for human readability. If empty is considered 0 (thus, empty content)
 
 ## Message examples:
 
@@ -59,9 +59,9 @@ Publish Proposal: `PUBLISH_PROPOSAL||1|9|$PROPOSAL`
 
 Response: `RESULT||1|22|{"response":"success"}` or `ACK||12345|0|`
 
-Ping: `PING|||0|`
+Ping: `PING||||`
 
-Pong: `PONG|||0|`
+Pong: `PONG||||`
 
 Error: `ERROR||1|12|InvalidTopic`
 
