@@ -58,7 +58,7 @@ pub enum Error {
     InvalidMessage,
     MissingField,
     InvalidVersion,
-    InvalidRandomId,
+    InvalidId,
     InvalidLength,
     ContentLengthMismatch { expected: u64, actual: u64 },
     MissingTopic,
@@ -74,7 +74,7 @@ impl fmt::Display for Error {
             Error::InvalidMessage => write!(f, "Invalid message type"),
             Error::MissingField => write!(f, "Missing message field"),
             Error::InvalidVersion => write!(f, "Invalid message version"),
-            Error::InvalidRandomId => write!(f, "Invalid random ID"),
+            Error::InvalidId => write!(f, "Invalid ID, must be a number"),
             Error::InvalidLength => write!(f, "Invalid length"),
             Error::ContentLengthMismatch { expected, actual } => write!(
                 f,
@@ -141,11 +141,7 @@ impl<'a> Message<'a> {
         let random_id = if random_id_str.is_empty() {
             None
         } else {
-            Some(
-                random_id_str
-                    .parse::<u64>()
-                    .map_err(|_| Error::InvalidRandomId)?,
-            )
+            Some(random_id_str.parse::<u64>().map_err(|_| Error::InvalidId)?)
         };
 
         let length_str = parts.next().ok_or(Error::MissingField)?;
