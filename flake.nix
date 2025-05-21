@@ -45,11 +45,13 @@
             })
             cargo2nix.packages.${system}.cargo2nix
             pkg-config
+            openssl
+            openssl.dev
             websocat  # Added websocat for testing WebSocket connections
             elementsd # Added elementsd for testing
           ];
           
-          # Set environment variables if needed
+          # Set environment variables for OpenSSL and elements
           shellHook = ''
             echo "NexusRelay development environment"
             echo "Use 'cargo build' to build the project"
@@ -60,6 +62,11 @@
 
             # Export environment variables
             export ELEMENTSD_EXEC="${pkgs.elementsd}/bin/elementsd"
+            
+            # OpenSSL environment variables
+            export OPENSSL_DIR="${pkgs.openssl.dev}"
+            export OPENSSL_LIB_DIR="${pkgs.openssl.out}/lib"
+            export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
           '';
         };
       });
