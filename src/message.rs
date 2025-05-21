@@ -5,10 +5,10 @@ use std::str::FromStr;
 use lwk_wollet::{LiquidexProposal, Unvalidated, Validated};
 
 #[derive(Debug, PartialEq, Clone)]
-pub(crate) struct Message<'a> {
-    pub(crate) type_: MessageType,
-    pub(crate) random_id: Option<u64>,
-    pub(crate) content: &'a str,
+pub struct Message<'a> {
+    pub type_: MessageType,
+    pub random_id: Option<u64>,
+    pub content: &'a str,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn test_error_invalid_random_id() {
         let result = Message::parse("PUBLISH||invalid|0|");
-        assert!(matches!(result, Err(Error::InvalidRandomId)));
+        assert!(matches!(result, Err(Error::InvalidId)));
     }
 
     #[test]

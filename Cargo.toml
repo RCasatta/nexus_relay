@@ -3,6 +3,14 @@ name = "nexus_relay"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "nexus_relay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nexus_relay"
+path = "src/main.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.19"
