@@ -26,7 +26,7 @@
         };
 
         rustPkgs = pkgs.rustBuilder.makePackageSet {
-          rustVersion = "1.76.0";
+          rustVersion = "1.82.0";
           packageFun = import ./Cargo.nix;
           extraRustComponents = [ "rustfmt" "clippy" ];
         };
@@ -46,6 +46,7 @@
             cargo2nix.packages.${system}.cargo2nix
             pkg-config
             websocat  # Added websocat for testing WebSocket connections
+            elementsd # Added elementsd for testing
           ];
           
           # Set environment variables if needed
@@ -54,7 +55,11 @@
             echo "Use 'cargo build' to build the project"
             echo "Use 'cargo run' to run the server"
             echo "Use 'cargo2nix' to regenerate the Cargo.nix file after updating dependencies"
+            echo "Use 'elements{d,-cli}' for elements"
             echo "Use 'websocat' to test WebSocket connections"
+
+            # Export environment variables
+            export ELEMENTSD_EXEC="${pkgs.elementsd}/bin/elementsd"
           '';
         };
       });
