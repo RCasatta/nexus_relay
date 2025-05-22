@@ -23,6 +23,7 @@ elements = "0.21"
 
 [dev-dependencies]
 bitcoind = { version = "0.36.0" }
+hex = "*"
 
 [patch.crates-io]
 lwk_wollet = { git = "https://github.com/Blockstream/lwk", branch = "master" }

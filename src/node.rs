@@ -27,8 +27,6 @@ impl Client {
 
         let bytes = self.client.get(&url).send().await?.bytes().await?;
 
-        println!("bytes: {:?}", bytes);
-
         let tx = Transaction::consensus_decode(bytes.as_ref())?;
         Ok(tx)
     }
@@ -36,17 +34,76 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    use super::Client;
     use bitcoind::bitcoincore_rpc::RpcApi;
     use bitcoind::{BitcoinD, Conf};
-    use elements::Address;
+    use elements::encode::Decodable;
     use elements::Txid;
+    use elements::{Address, BlockHash};
     use serde_json::Value;
     use std::env;
     use std::ffi::OsStr;
     use std::str::FromStr;
     use tokio::runtime::Runtime;
+    pub struct Node {
+        elementsd: BitcoinD,
+    }
 
-    use super::Client;
+    impl Node {
+        pub fn new(elementsd: BitcoinD) -> Self {
+            Self { elementsd }
+        }
+        pub fn get_new_address(&self) -> Result<Address, Box<dyn std::error::Error + Send + Sync>> {
+            let addr: Value = self
+                .elementsd
+                .client
+                .call("getnewaddress", &["label".into(), "p2sh-segwit".into()])
+                .unwrap();
+            let address = Address::from_str(addr.as_str().unwrap()).unwrap();
+            Ok(address)
+        }
+        pub fn generate_to_address(
+            &self,
+            block_num: u64,
+            address: &Address,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.elementsd
+                .client
+                .call::<Value>(
+                    "generatetoaddress",
+                    &[block_num.into(), address.to_string().into()],
+                )
+                .unwrap();
+            Ok(())
+        }
+        pub fn get_block_hash(
+            &self,
+            block_num: u64,
+        ) -> Result<BlockHash, Box<dyn std::error::Error + Send + Sync>> {
+            let block: Value = self
+                .elementsd
+                .client
+                .call("getblockhash", &[block_num.into()])
+                .unwrap();
+            let string = block.as_str().unwrap();
+            let block_hash = BlockHash::from_str(string).unwrap();
+            Ok(block_hash)
+        }
+        pub fn get_block(
+            &self,
+            block_hash: BlockHash,
+        ) -> Result<elements::Block, Box<dyn std::error::Error + Send + Sync>> {
+            let block: Value = self
+                .elementsd
+                .client
+                .call("getblock", &[block_hash.to_string().into(), 0.into()])
+                .unwrap();
+            let string = block.as_str().unwrap();
+            let bytes = hex::decode(string).unwrap();
+            let block = elements::Block::consensus_decode(&bytes[..]).unwrap();
+            Ok(block)
+        }
+    }
 
     fn launch_elementsd<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
         let mut conf = Conf::default();
@@ -71,31 +128,24 @@ mod tests {
     fn test_launch_elementsd() {
         let elementsd_exe = env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set");
         let elementsd = launch_elementsd(elementsd_exe);
-
         let client = Client::new(elementsd.rpc_url());
 
-        let addr: Value = elementsd
-            .client
-            .call("getnewaddress", &["label".into(), "p2sh-segwit".into()])
-            .unwrap();
-        let address = Address::from_str(addr.as_str().unwrap())
-            .unwrap()
-            .to_string();
+        let node = Node::new(elementsd);
 
-        elementsd
-            .client
-            .call::<Value>("generatetoaddress", &[101.into(), address.into()])
-            .unwrap();
+        let address = node.get_new_address().unwrap();
 
-        // let block = elementsd.client.get_block(&block_hashes[101]).unwrap();
-        // let txid = Txid::from_str(&block.txdata[0].txid().to_string()).unwrap();
+        node.generate_to_address(101, &address).unwrap();
 
-        // // Create a tokio runtime
-        // let rt = Runtime::new().unwrap();
+        let block_hash = node.get_block_hash(101).unwrap();
+        let block = node.get_block(block_hash).unwrap();
+        let txid = block.txdata[0].txid();
 
-        // // Use block_on to run the async code
-        // let tx = rt.block_on(client.tx(txid)).unwrap();
+        // Create a tokio runtime
+        let rt = Runtime::new().unwrap();
 
-        // println!("{:?}", tx);
+        // Use block_on to run the async code
+        let tx = rt.block_on(client.tx(txid)).unwrap();
+
+        assert_eq!(tx.txid(), block.txdata[0].txid());
     }
 }
