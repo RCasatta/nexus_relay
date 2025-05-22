@@ -1,5 +1,7 @@
 use elements::Address;
+use elements::OutPoint;
 use elements::{encode::Decodable, Transaction, Txid};
+use serde_json::Value;
 use std::ffi::OsStr;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
@@ -29,6 +31,31 @@ impl Client {
 
         let tx = Transaction::consensus_decode(bytes.as_ref())?;
         Ok(tx)
+    }
+
+    /// GET /rest/getutxos/checkmempool/<TXID>-<N>/<TXID>-<N>/.../<TXID>-<N>.<bin|hex|json>
+    async fn get_utxos(
+        &self,
+        outpoint: OutPoint,
+    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
+        let base = &self.base_url;
+        let outpoint_str = format!("{}-{}", outpoint.txid, outpoint.vout);
+        let url = format!("{base}/rest/getutxos/checkmempool/{outpoint_str}.json");
+
+        let json: Value = self.client.get(&url).send().await?.json().await?;
+        println!("{:?}", json);
+        Ok(json)
+    }
+
+    pub async fn is_spent(
+        &self,
+        outpoint: OutPoint,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        let json = self.get_utxos(outpoint).await?;
+        Ok(json["utxos"]
+            .as_array()
+            .ok_or("utxos is not an array")?
+            .is_empty())
     }
 }
 
@@ -146,6 +173,14 @@ mod tests {
         // Use block_on to run the async code
         let tx = rt.block_on(client.tx(txid)).unwrap();
 
+        let outpoint = elements::OutPoint {
+            txid: txid,
+            vout: 1,
+        };
+
+        let _utxos = rt.block_on(client.get_utxos(outpoint)).unwrap();
+        let is_spent = rt.block_on(client.is_spent(outpoint)).unwrap();
         assert_eq!(tx.txid(), block.txdata[0].txid());
+        assert!(is_spent);
     }
 }
