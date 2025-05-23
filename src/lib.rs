@@ -139,6 +139,7 @@ pub async fn process_message<'a>(
             let proposal = if let Some(client) = client {
                 let tx = client.tx(txid).await.unwrap();
                 proposal.validate(tx)?
+                // TODO verify it's unspent
             } else {
                 proposal.insecure_validate()?
             };
@@ -201,6 +202,7 @@ pub async fn process_message<'a>(
             Ok(message_response)
         }
         MessageType::Pong => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
+        MessageType::PublishPset => Err(Box::new(Error::NotImplemented)),
     }
 }
 

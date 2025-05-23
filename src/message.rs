@@ -15,6 +15,7 @@ pub struct Message<'a> {
 pub enum MessageType {
     Publish,
     PublishProposal,
+    PublishPset,
     Subscribe,
     Result,
     Error,
@@ -27,6 +28,7 @@ impl fmt::Display for MessageType {
         match self {
             MessageType::Publish => write!(f, "PUBLISH"),
             MessageType::PublishProposal => write!(f, "PUBLISH_PROPOSAL"),
+            MessageType::PublishPset => write!(f, "PUBLISH_PSET"),
             MessageType::Subscribe => write!(f, "SUBSCRIBE"),
             MessageType::Result => write!(f, "RESULT"),
             MessageType::Error => write!(f, "ERROR"),
@@ -43,6 +45,7 @@ impl FromStr for MessageType {
         match s {
             "PUBLISH" => Ok(MessageType::Publish),
             "PUBLISH_PROPOSAL" => Ok(MessageType::PublishProposal),
+            "PUBLISH_PSET" => Ok(MessageType::PublishPset),
             "SUBSCRIBE" => Ok(MessageType::Subscribe),
             "RESULT" => Ok(MessageType::Result),
             "ERROR" => Ok(MessageType::Error),
@@ -66,6 +69,7 @@ pub enum Error {
     MissingContent,
     InvalidProposal,
     ResponseMessageUsedAsRequest,
+    NotImplemented,
 }
 
 impl fmt::Display for Error {
@@ -86,6 +90,7 @@ impl fmt::Display for Error {
             Error::InvalidProposal => write!(f, "Invalid proposal"),
             Error::InvalidTopic => write!(f, "Invalid topic"),
             Error::ResponseMessageUsedAsRequest => write!(f, "Response message used as request"),
+            Error::NotImplemented => write!(f, "Not implemented"),
         }
     }
 }
@@ -208,6 +213,30 @@ mod tests {
 
     fn proposal_str() -> &'static str {
         include_str!("../test_data/proposal.json")
+    }
+
+    #[test]
+    fn test_message_type_roundtrip() {
+        // Test all variants of MessageType for roundtrip conversion
+        let types = vec![
+            MessageType::Publish,
+            MessageType::PublishProposal,
+            MessageType::PublishPset,
+            MessageType::Subscribe,
+            MessageType::Result,
+            MessageType::Error,
+            MessageType::Ping,
+            MessageType::Pong,
+        ];
+
+        for msg_type in types {
+            // Convert MessageType to string
+            let type_str = msg_type.to_string();
+            // Parse string back to MessageType
+            let parsed_type = MessageType::from_str(&type_str).unwrap();
+            // Verify roundtrip conversion
+            assert_eq!(msg_type, parsed_type);
+        }
     }
 
     #[test]
