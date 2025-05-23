@@ -6,14 +6,14 @@ use std::ffi::OsStr;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
 
-pub struct Client {
+pub struct Node {
     client: reqwest::Client,
     base_url: String,
 }
 
-impl Client {
+impl Node {
     pub fn new(base_url: String) -> Self {
-        Client {
+        Node {
             client: reqwest::Client::new(),
             base_url,
         }
@@ -61,7 +61,7 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
-    use super::Client;
+    use super::Node;
     use bitcoind::bitcoincore_rpc::RpcApi;
     use bitcoind::{BitcoinD, Conf};
     use elements::encode::Decodable;
@@ -72,11 +72,11 @@ mod tests {
     use std::ffi::OsStr;
     use std::str::FromStr;
     use tokio::runtime::Runtime;
-    pub struct Node {
+    pub struct TestNode {
         elementsd: BitcoinD,
     }
 
-    impl Node {
+    impl TestNode {
         pub fn new(elementsd: BitcoinD) -> Self {
             Self { elementsd }
         }
@@ -155,31 +155,31 @@ mod tests {
     fn test_launch_elementsd() {
         let elementsd_exe = env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set");
         let elementsd = launch_elementsd(elementsd_exe);
-        let client = Client::new(elementsd.rpc_url());
+        let node = Node::new(elementsd.rpc_url());
 
-        let node = Node::new(elementsd);
+        let test_node = TestNode::new(elementsd);
 
-        let address = node.get_new_address().unwrap();
+        let address = test_node.get_new_address().unwrap();
 
-        node.generate_to_address(101, &address).unwrap();
+        test_node.generate_to_address(101, &address).unwrap();
 
-        let block_hash = node.get_block_hash(101).unwrap();
-        let block = node.get_block(block_hash).unwrap();
+        let block_hash = test_node.get_block_hash(101).unwrap();
+        let block = test_node.get_block(block_hash).unwrap();
         let txid = block.txdata[0].txid();
 
         // Create a tokio runtime
         let rt = Runtime::new().unwrap();
 
         // Use block_on to run the async code
-        let tx = rt.block_on(client.tx(txid)).unwrap();
+        let tx = rt.block_on(node.tx(txid)).unwrap();
 
         let outpoint = elements::OutPoint {
             txid: txid,
             vout: 1,
         };
 
-        let _utxos = rt.block_on(client.get_utxos(outpoint)).unwrap();
-        let is_spent = rt.block_on(client.is_spent(outpoint)).unwrap();
+        let _utxos = rt.block_on(node.get_utxos(outpoint)).unwrap();
+        let is_spent = rt.block_on(node.is_spent(outpoint)).unwrap();
         assert_eq!(tx.txid(), block.txdata[0].txid());
         assert!(is_spent);
     }

@@ -1,7 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use lwk_wollet::elements::AssetId;
 use message::{proposal_topic, Error, Message, MessageType};
-use node::Client;
+use node::Node;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -88,8 +88,8 @@ pub async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // Create our shared topic registry
     let topic_registry = Arc::new(Mutex::new(TopicRegistry::new()));
 
-    // Create our shared client
-    let client = Arc::new(Mutex::new(Client::new(base_url)));
+    // Create our shared client - no need for Mutex since methods only take &self
+    let client = Arc::new(Node::new(base_url));
 
     while let Ok((stream, addr)) = listener.accept().await {
         let registry = topic_registry.clone();
@@ -105,17 +105,23 @@ pub async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // Process a message and return the response to send back to the client
-pub fn process_message<'a>(
+pub async fn process_message<'a>(
     message_request: &'a Message<'a>,
-    registry: &mut TopicRegistry,
-    client: &Client,
+    registry: Arc<Mutex<TopicRegistry>>,
+    client: Option<&Node>,
     client_tx_clone: &mpsc::UnboundedSender<String>,
 ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
     match message_request.type_ {
         MessageType::Publish => {
             let (topic, content) = message_request.topic_content()?;
             let message_to_subscriber = Message::new(MessageType::Result, None, &content);
-            let sent_count = registry.publish(&topic, message_to_subscriber);
+
+            // Lock the mutex only when needed and release it immediately
+            let sent_count = {
+                let mut registry_guard = registry.lock().unwrap();
+                registry_guard.publish(&topic, message_to_subscriber)
+            };
+
             println!(
                 "Message sent to {} subscribers on topic: {}",
                 sent_count, topic
@@ -129,12 +135,23 @@ pub fn process_message<'a>(
         }
         MessageType::PublishProposal => {
             let proposal = message_request.proposal()?;
-            // let txid = proposal.txid();
-            let proposal = proposal.insecure_validate()?; // TODO: validate properly
+            let txid = proposal.needed_tx()?;
+            let proposal = if let Some(client) = client {
+                let tx = client.tx(txid).await.unwrap();
+                proposal.validate(tx)?
+            } else {
+                proposal.insecure_validate()?
+            };
             let topic = proposal_topic(&proposal)?;
             let proposal_str = format!("{}", proposal);
             let message_to_subscriber = Message::new(MessageType::Result, None, &proposal_str);
-            let sent_count = registry.publish(&topic, message_to_subscriber);
+
+            // Lock the mutex only when needed and release it immediately
+            let sent_count = {
+                let mut registry_guard = registry.lock().unwrap();
+                registry_guard.publish(&topic, message_to_subscriber)
+            };
+
             println!(
                 "Message sent to {} subscribers on topic: {}",
                 sent_count, topic
@@ -167,7 +184,12 @@ pub fn process_message<'a>(
                 }
             }
 
-            registry.subscribe(topic, client_tx_clone.clone());
+            // Lock the mutex only when needed and release it immediately
+            {
+                let mut registry_guard = registry.lock().unwrap();
+                registry_guard.subscribe(topic, client_tx_clone.clone());
+            }
+
             let message_response =
                 Message::new(MessageType::Result, message_request.random_id, "subscribed");
             Ok(message_response)
@@ -186,7 +208,7 @@ pub async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
     registry: Arc<Mutex<TopicRegistry>>,
-    client: Arc<Mutex<Client>>,
+    client: Arc<Node>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Incoming connection from: {}", addr);
 
@@ -238,16 +260,19 @@ pub async fn handle_connection(
             };
 
             // Process the message and get response
-            let response = {
-                let mut registry = registry_clone.lock().unwrap();
-                let client = client_clone.lock().unwrap();
-                match process_message(&raw_message, &mut registry, &client, &client_tx_clone) {
-                    Ok(response) => response.to_string(),
-                    Err(e) => {
-                        let error_string = e.to_string();
-                        Message::new(MessageType::Error, raw_message.random_id, &error_string)
-                            .to_string()
-                    }
+            let response = match process_message(
+                &raw_message,
+                registry_clone.clone(),
+                Some(&client_clone),
+                &client_tx_clone,
+            )
+            .await
+            {
+                Ok(response) => response.to_string(),
+                Err(e) => {
+                    let error_string = e.to_string();
+                    Message::new(MessageType::Error, raw_message.random_id, &error_string)
+                        .to_string()
                 }
             };
 
@@ -273,19 +298,19 @@ pub async fn handle_connection(
 mod tests {
     use super::*;
     use crate::message::{Message, MessageType};
+    use tokio::runtime::Runtime;
 
     fn proposal_str() -> &'static str {
         include_str!("../test_data/proposal.json")
     }
 
-    fn process_message_test<'a>(
+    async fn process_message_test<'a>(
         message_request: &'a Message<'a>,
-        registry: &mut TopicRegistry,
+        registry: Arc<Mutex<TopicRegistry>>,
     ) -> String {
         let (client_tx, _client_rx) = mpsc::unbounded_channel();
-        let client = Client::new("http://localhost:8332".to_string());
 
-        match process_message(message_request, registry, &client, &client_tx) {
+        match process_message(message_request, registry, None, &client_tx).await {
             Ok(response) => response.to_string(),
             Err(e) => {
                 let error_string = e.to_string();
@@ -302,15 +327,19 @@ mod tests {
 
     #[test]
     fn test_process_message_ping() {
+        // Create a runtime
+        let rt = Runtime::new().unwrap();
+
         // Create test message and registry
         let message_str = "PING||||";
         let raw_message = Message::parse(message_str).unwrap();
-        let mut registry = TopicRegistry::new();
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
         let (client_tx, _client_rx) = mpsc::unbounded_channel();
-        let client = Client::new("http://localhost:8332".to_string());
 
         // Process the message
-        let response = process_message(&raw_message, &mut registry, &client, &client_tx).unwrap();
+        let response = rt
+            .block_on(process_message(&raw_message, registry, None, &client_tx))
+            .unwrap();
 
         // Verify response
         assert_eq!(response.to_string(), "PONG||||");
@@ -318,15 +347,19 @@ mod tests {
 
     #[test]
     fn test_process_message_subscribe() {
+        // Create a runtime
+        let rt = Runtime::new().unwrap();
+
         // Create test message with a topic
         let message_str = "SUBSCRIBE||1|6|topic1";
         let raw_message = Message::parse(message_str).unwrap();
-        let mut registry = TopicRegistry::new();
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
         let (client_tx, _client_rx) = mpsc::unbounded_channel();
-        let client = Client::new("http://localhost:8332".to_string());
 
         // Process the message
-        let response = process_message(&raw_message, &mut registry, &client, &client_tx).unwrap();
+        let response = rt
+            .block_on(process_message(&raw_message, registry, None, &client_tx))
+            .unwrap();
 
         // Verify response
         assert_eq!(response.to_string(), "RESULT||1|10|subscribed");
@@ -336,13 +369,16 @@ mod tests {
 
     #[test]
     fn test_process_message_subscribe_empty_topic() {
+        // Create a runtime
+        let rt = Runtime::new().unwrap();
+
         // Create test message with empty topic
         let message_str = "SUBSCRIBE||1|0|";
         let raw_message = Message::parse(message_str).unwrap();
-        let mut registry = TopicRegistry::new();
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
 
         // Process the message
-        let err = process_message_test(&raw_message, &mut registry);
+        let err = rt.block_on(process_message_test(&raw_message, registry));
 
         // Verify response
         assert_eq!(err, "ERROR||1|13|Missing topic");
@@ -350,6 +386,9 @@ mod tests {
 
     #[test]
     fn test_subscribe_publish() {
+        // Create a runtime
+        let rt = Runtime::new().unwrap();
+
         let id1 = 12341234;
         let id2 = 12341235;
         let proposal_json = proposal_str();
@@ -367,13 +406,18 @@ mod tests {
         // Subscribe to the topic of the proposal
         let message_str = format!("SUBSCRIBE||{id2}|129|{topic}");
         let message = Message::parse(&message_str).unwrap();
-        let mut registry = TopicRegistry::new();
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
         let (client_tx1, mut client_rx1) = mpsc::unbounded_channel();
-        let client = Client::new("http://localhost:8332".to_string());
 
         // Process the message
-        let message_response =
-            process_message(&message, &mut registry, &client, &client_tx1).unwrap();
+        let message_response = rt
+            .block_on(process_message(
+                &message,
+                registry.clone(),
+                None,
+                &client_tx1,
+            ))
+            .unwrap();
 
         // Verify response
         assert_eq!(
@@ -383,8 +427,14 @@ mod tests {
 
         // Publish the proposal as another client
         let (client_tx2, _client_rx2) = mpsc::unbounded_channel();
-        let message_response =
-            process_message(&message_publish, &mut registry, &client, &client_tx2).unwrap();
+        let message_response = rt
+            .block_on(process_message(
+                &message_publish,
+                registry,
+                None,
+                &client_tx2,
+            ))
+            .unwrap();
         assert_eq!(
             message_response.to_string(),
             format!("RESULT||{id1}|18|proposal published")

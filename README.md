@@ -31,9 +31,13 @@ The server uses a simple text-based protocol, the message follow this structure:
 The following message types are possible, specific details for message type in the following section:
 
 * PUBLISH
-* PUBLISH_PROPOSAL
+* PUBLISH_PROPOSAL (partially implemented)
+* PUBLISH_PSET (unimplemented)
 * SUBSCRIBE
-* UNSUBSCRIBE
+ * PROPOSAL: `buy_asset_id|sell_asset_id`
+ * PSET: `wallet_id` (unimplemented)
+ * ADDRESS: `address` (unimplemented)
+* UNSUBSCRIBE (unimplemented)
 * RESULT
 * ERROR
 * PING
