@@ -1,6 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use lwk_wollet::elements::AssetId;
 use message::{proposal_topic, Error, Message, MessageType};
+use node::Client;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -72,17 +73,29 @@ pub async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         8080
     };
 
+    // Get base URL for the Client, default to localhost:8332 if not provided
+    let base_url = if args.len() > 2 {
+        args[2].clone()
+    } else {
+        String::from("http://localhost:8332")
+    };
+
     let addr = format!("0.0.0.0:{}", port);
     let listener = TcpListener::bind(&addr).await?;
     println!("WebSocket server listening on: {}", addr);
+    println!("Client connecting to: {}", base_url);
 
     // Create our shared topic registry
     let topic_registry = Arc::new(Mutex::new(TopicRegistry::new()));
 
+    // Create our shared client
+    let client = Arc::new(Mutex::new(Client::new(base_url)));
+
     while let Ok((stream, addr)) = listener.accept().await {
         let registry = topic_registry.clone();
+        let client_clone = client.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_connection(stream, addr, registry).await {
+            if let Err(e) = handle_connection(stream, addr, registry, client_clone).await {
                 eprintln!("Error handling connection from {}: {}", addr, e);
             }
         });
@@ -95,6 +108,7 @@ pub async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
 pub fn process_message<'a>(
     message_request: &'a Message<'a>,
     registry: &mut TopicRegistry,
+    client: &Client,
     client_tx_clone: &mpsc::UnboundedSender<String>,
 ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
     match message_request.type_ {
@@ -115,6 +129,7 @@ pub fn process_message<'a>(
         }
         MessageType::PublishProposal => {
             let proposal = message_request.proposal()?;
+            // let txid = proposal.txid();
             let proposal = proposal.insecure_validate()?; // TODO: validate properly
             let topic = proposal_topic(&proposal)?;
             let proposal_str = format!("{}", proposal);
@@ -171,6 +186,7 @@ pub async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
     registry: Arc<Mutex<TopicRegistry>>,
+    client: Arc<Mutex<Client>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Incoming connection from: {}", addr);
 
@@ -186,6 +202,7 @@ pub async fn handle_connection(
 
     // Handle incoming messages from WebSocket
     let registry_clone = registry.clone();
+    let client_clone = client.clone();
     let client_tx_clone = client_tx.clone();
 
     // Spawn task for forwarding messages from client_rx to WebSocket
@@ -223,7 +240,8 @@ pub async fn handle_connection(
             // Process the message and get response
             let response = {
                 let mut registry = registry_clone.lock().unwrap();
-                match process_message(&raw_message, &mut registry, &client_tx_clone) {
+                let client = client_clone.lock().unwrap();
+                match process_message(&raw_message, &mut registry, &client, &client_tx_clone) {
                     Ok(response) => response.to_string(),
                     Err(e) => {
                         let error_string = e.to_string();
@@ -265,8 +283,9 @@ mod tests {
         registry: &mut TopicRegistry,
     ) -> String {
         let (client_tx, _client_rx) = mpsc::unbounded_channel();
+        let client = Client::new("http://localhost:8332".to_string());
 
-        match process_message(message_request, registry, &client_tx) {
+        match process_message(message_request, registry, &client, &client_tx) {
             Ok(response) => response.to_string(),
             Err(e) => {
                 let error_string = e.to_string();
@@ -278,7 +297,6 @@ mod tests {
 
     #[test]
     fn test_process_message_not_properly_formatted() {
-
         // TODO refactor out a fn process_str_message() which takes a string and returns a Message so that this is unit testable
     }
 
@@ -289,9 +307,10 @@ mod tests {
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
         let (client_tx, _client_rx) = mpsc::unbounded_channel();
+        let client = Client::new("http://localhost:8332".to_string());
 
         // Process the message
-        let response = process_message(&raw_message, &mut registry, &client_tx).unwrap();
+        let response = process_message(&raw_message, &mut registry, &client, &client_tx).unwrap();
 
         // Verify response
         assert_eq!(response.to_string(), "PONG||||");
@@ -304,9 +323,10 @@ mod tests {
         let raw_message = Message::parse(message_str).unwrap();
         let mut registry = TopicRegistry::new();
         let (client_tx, _client_rx) = mpsc::unbounded_channel();
+        let client = Client::new("http://localhost:8332".to_string());
 
         // Process the message
-        let response = process_message(&raw_message, &mut registry, &client_tx).unwrap();
+        let response = process_message(&raw_message, &mut registry, &client, &client_tx).unwrap();
 
         // Verify response
         assert_eq!(response.to_string(), "RESULT||1|10|subscribed");
@@ -325,7 +345,7 @@ mod tests {
         let err = process_message_test(&raw_message, &mut registry);
 
         // Verify response
-        assert_eq!(err.to_string(), "ERROR||1|13|Missing topic");
+        assert_eq!(err, "ERROR||1|13|Missing topic");
     }
 
     #[test]
@@ -349,8 +369,11 @@ mod tests {
         let message = Message::parse(&message_str).unwrap();
         let mut registry = TopicRegistry::new();
         let (client_tx1, mut client_rx1) = mpsc::unbounded_channel();
+        let client = Client::new("http://localhost:8332".to_string());
+
         // Process the message
-        let message_response = process_message(&message, &mut registry, &client_tx1).unwrap();
+        let message_response =
+            process_message(&message, &mut registry, &client, &client_tx1).unwrap();
 
         // Verify response
         assert_eq!(
@@ -361,7 +384,7 @@ mod tests {
         // Publish the proposal as another client
         let (client_tx2, _client_rx2) = mpsc::unbounded_channel();
         let message_response =
-            process_message(&message_publish, &mut registry, &client_tx2).unwrap();
+            process_message(&message_publish, &mut registry, &client, &client_tx2).unwrap();
         assert_eq!(
             message_response.to_string(),
             format!("RESULT||{id1}|18|proposal published")
