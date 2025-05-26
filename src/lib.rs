@@ -20,15 +20,15 @@ pub mod zmq;
 #[derive(Parser, Debug)]
 pub struct Config {
     /// Port number to listen on
-    #[clap(default_value = "8080")]
+    #[clap(long, default_value = "8080")]
     pub port: u16,
 
     /// Base URL for the client
-    #[clap(default_value = "http://localhost:8332")]
+    #[clap(long, default_value = "http://localhost:8332")]
     pub base_url: String,
 
     /// ZMQ endpoint
-    #[clap(default_value = "tcp://127.0.0.1:29000")]
+    #[clap(long, default_value = "tcp://127.0.0.1:29000")]
     pub zmq_endpoint: String,
 }
 
