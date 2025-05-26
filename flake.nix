@@ -32,6 +32,9 @@
         };
 
         nexusRelay = (rustPkgs.workspace.nexus_relay {}).bin;
+        
+        # Python environment with zmq
+        pythonWithZmq = pkgs.python3.withPackages (ps: [ ps.pyzmq ]);
       in
       {
         packages = {
@@ -49,6 +52,7 @@
             openssl.dev
             websocat  # Added websocat for testing WebSocket connections
             elementsd # Added elementsd for testing
+            pythonWithZmq # Added Python with ZMQ support
           ];
           
           # Set environment variables the Nix way

@@ -12,6 +12,7 @@ use tokio_tungstenite::tungstenite::Message as TokioMessage;
 
 pub mod message;
 pub mod node;
+pub mod zmq;
 
 // Our global state to track topic subscribers
 pub struct TopicRegistry {
@@ -80,16 +81,33 @@ pub async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         String::from("http://localhost:8332")
     };
 
+    // Get ZMQ endpoint if provided
+    let zmq_endpoint = if args.len() > 3 {
+        args[3].clone()
+    } else {
+        String::from("tcp://127.0.0.1:29000")
+    };
+
     let addr = format!("0.0.0.0:{}", port);
     let listener = TcpListener::bind(&addr).await?;
     println!("WebSocket server listening on: {}", addr);
     println!("Client connecting to: {}", base_url);
+    println!("ZMQ subscriber listening on: {}", zmq_endpoint);
 
     // Create our shared topic registry
     let topic_registry = Arc::new(Mutex::new(TopicRegistry::new()));
 
     // Create our shared client - no need for Mutex since methods only take &self
     let client = Arc::new(Node::new(base_url));
+
+    // Start ZMQ listener
+    let registry_clone = topic_registry.clone();
+    let zmq_endpoint_clone = zmq_endpoint.clone();
+    tokio::spawn(async move {
+        if let Err(e) = zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone).await {
+            eprintln!("Error in ZMQ listener: {}", e);
+        }
+    });
 
     while let Ok((stream, addr)) = listener.accept().await {
         let registry = topic_registry.clone();
