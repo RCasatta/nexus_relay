@@ -4,49 +4,50 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    cargo2nix = {
-      url = "github:cargo2nix/cargo2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, cargo2nix, rust-overlay, ... }:
+  outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [
-            cargo2nix.overlays.default
-            rust-overlay.overlays.default
-          ];
-        };
-
-        rustPkgs = pkgs.rustBuilder.makePackageSet {
-          rustVersion = "1.82.0";
-          packageFun = import ./Cargo.nix;
-          extraRustComponents = [ "rustfmt" "clippy" ];
-        };
-
-        nexusRelay = (rustPkgs.workspace.nexus_relay {}).bin;
+        pkgs = nixpkgs.legacyPackages.${system};
         
         # Python environment with zmq
         pythonWithZmq = pkgs.python3.withPackages (ps: [ ps.pyzmq ]);
       in
       {
-        packages = {
-          default = nexusRelay;
+        packages.default = pkgs.rustPlatform.buildRustPackage {
+          pname = "nexus_relay";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            # TODO remove once released
+            outputHashes = {
+              "lwk_wollet-0.9.0" = "sha256-qskba+TrMJAQlm7jE/08BjsuFktZyMLs2tx4jGNLJb0=";
+              "lwk_common-0.9.0" = "sha256-qskba+TrMJAQlm7jE/08BjsuFktZyMLs2tx4jGNLJb0=";
+              "elements-0.25.2" = "sha256-pUbvYi1LZn73w4owjVjOvBSTeAaL1/44zSsEpT6i4EE=";
+
+            };
+          };
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+          ];
+          buildInputs = with pkgs; [
+            openssl
+            elementsd # Add elementsd to buildInputs
+          ];
+          
+          # Pass environment variables to the build and test process
+          ELEMENTSD_EXEC = "${pkgs.elementsd}/bin/elementsd";
+          
         };
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            (rust-bin.stable.latest.default.override {
-              extensions = [ "rust-src" "rustfmt" "clippy" ];
-            })
-            cargo2nix.packages.${system}.cargo2nix
+            cargo
+            rustc
+            rustfmt
+            clippy
             pkg-config
             openssl
             openssl.dev
