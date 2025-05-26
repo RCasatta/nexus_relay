@@ -1,5 +1,5 @@
 use crate::message::{Message, MessageType};
-use crate::TopicRegistry;
+use crate::{Network, TopicRegistry};
 use elements::encode::Decodable;
 use futures_util::StreamExt;
 use log::{error, info};
@@ -12,6 +12,7 @@ use tmq::{subscribe, Context, Multipart};
 pub fn process_zmq_message(
     msg: Multipart,
     registry: &Arc<Mutex<TopicRegistry>>,
+    network: &Network,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut iter = msg.iter().map(|item| item.as_ref());
     let topic = iter.next().unwrap();
@@ -24,11 +25,9 @@ pub fn process_zmq_message(
         log::info!("Processing ZMQ message with txid: {}", txid);
 
         for out in tx.output {
-            if let Some(addr) = elements::Address::from_script(
-                &out.script_pubkey,
-                None,
-                &elements::AddressParams::ELEMENTS,
-            ) {
+            if let Some(addr) =
+                elements::Address::from_script(&out.script_pubkey, None, network.address_params())
+            {
                 // Get the address as a string to use as the topic
                 let address_str = addr.to_string();
 
@@ -39,6 +38,7 @@ pub fn process_zmq_message(
                     // Create a message to publish
                     let message = Message::new(MessageType::Result, None, &content);
 
+                    log::info!("Publishing message to address: {}", address_str);
                     // Publish using the address as the topic
                     registry.publish(&address_str, message);
                 } else {
@@ -54,6 +54,7 @@ pub fn process_zmq_message(
 pub async fn start_zmq_listener(
     registry: Arc<Mutex<TopicRegistry>>,
     endpoint: &str,
+    network: Network,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ctx = Context::new();
 
@@ -68,7 +69,7 @@ pub async fn start_zmq_listener(
     while let Some(msg) = socket.next().await {
         match msg {
             Ok(multipart) => {
-                if let Err(e) = process_zmq_message(multipart, &registry) {
+                if let Err(e) = process_zmq_message(multipart, &registry, &network) {
                     error!("Error processing ZMQ message: {}", e);
                 }
             }
@@ -135,7 +136,7 @@ mod tests {
         }
 
         // Process the message
-        let result = process_zmq_message(multipart, &registry);
+        let result = process_zmq_message(multipart, &registry, &Network::ElementsRegtest);
 
         // Verify the processing succeeded
         assert!(result.is_ok());

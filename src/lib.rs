@@ -1,4 +1,6 @@
 use clap::Parser;
+use elements::bitcoin::NetworkKind;
+use elements::AddressParams;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
 use lwk_wollet::elements::AssetId;
@@ -30,6 +32,50 @@ pub struct Config {
     /// ZMQ endpoint
     #[clap(long, default_value = "tcp://127.0.0.1:29000")]
     pub zmq_endpoint: String,
+
+    /// Network to use
+    #[clap(long, value_enum, default_value = "liquid")]
+    pub network: Network,
+}
+
+#[derive(Clone, clap::ValueEnum, Debug, PartialEq, Eq, Copy)]
+pub enum Network {
+    Liquid,
+    LiquidTestnet,
+    ElementsRegtest,
+}
+
+impl Network {
+    pub fn as_network_kind(&self) -> NetworkKind {
+        match self {
+            Network::Liquid => NetworkKind::Main,
+            _ => NetworkKind::Test,
+        }
+    }
+
+    pub fn default_elements_listen_port(&self) -> u16 {
+        match self {
+            Network::Liquid => 7041,
+            Network::LiquidTestnet => 7039,
+            Network::ElementsRegtest => 7043, // TODO: check this
+        }
+    }
+
+    pub fn default_listen_port(&self) -> u16 {
+        match self {
+            Network::Liquid => 3100,
+            Network::LiquidTestnet => 3101,
+            Network::ElementsRegtest => 3102,
+        }
+    }
+
+    fn address_params(&self) -> &'static AddressParams {
+        match self {
+            Network::Liquid => &AddressParams::LIQUID,
+            Network::LiquidTestnet => &AddressParams::LIQUID_TESTNET,
+            Network::ElementsRegtest => &AddressParams::ELEMENTS,
+        }
+    }
 }
 
 // Our global state to track topic subscribers
@@ -83,6 +129,7 @@ pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>
     info!("WebSocket server listening on: {}", addr);
     info!("Client connecting to: {}", config.base_url);
     info!("ZMQ subscriber listening on: {}", config.zmq_endpoint);
+    info!("Using network: {:?}", config.network);
 
     // Create our shared topic registry
     let topic_registry = Arc::new(Mutex::new(TopicRegistry::new()));
@@ -93,8 +140,11 @@ pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>
     // Start ZMQ listener
     let registry_clone = topic_registry.clone();
     let zmq_endpoint_clone = config.zmq_endpoint.clone();
+    let network_clone = config.network;
     tokio::spawn(async move {
-        if let Err(e) = zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone).await {
+        if let Err(e) =
+            zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone, network_clone).await
+        {
             error!("Error in ZMQ listener: {}", e);
         }
     });
