@@ -2,10 +2,8 @@ use crate::message::{Message, MessageType};
 use crate::TopicRegistry;
 use elements::encode::Decodable;
 use futures_util::StreamExt;
-use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tmq::{subscribe, Context, Multipart};
-use tokio::sync::mpsc;
 
 /// Process a single ZMQ message.
 ///
@@ -85,6 +83,9 @@ mod tests {
     use super::*;
     use elements::hashes::{hash160, Hash};
     use elements::{encode::Encodable, Script};
+    use std::collections::VecDeque;
+    use std::time::Duration;
+    use tokio::sync::mpsc;
 
     #[test]
     fn test_process_zmq_message() {
@@ -140,19 +141,18 @@ mod tests {
         let txid = tx.txid().to_string();
 
         // Check if a message was published
-        let received = std::sync::mpsc::channel();
-        let sender = received.0.clone();
+        let (sender, receiver) = std::sync::mpsc::channel::<String>();
 
         // Create a tokio runtime for the async receiver
         let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.spawn(async move {
+        rt.block_on(async {
             if let Some(message) = rx_receiver.recv().await {
                 sender.send(message).unwrap();
             }
         });
 
         // Wait for the message with a timeout
-        let received_message = received.1.recv_timeout(std::time::Duration::from_secs(1));
+        let received_message = receiver.recv_timeout(Duration::from_secs(1));
         assert!(
             received_message.is_ok(),
             "No message was published to the address"

@@ -1,3 +1,4 @@
+use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use lwk_wollet::elements::AssetId;
 use message::{proposal_topic, Error, Message, MessageType};
@@ -13,6 +14,22 @@ use tokio_tungstenite::tungstenite::Message as TokioMessage;
 pub mod message;
 pub mod node;
 pub mod zmq;
+
+/// Configuration for Nexus Relay
+#[derive(Parser, Debug)]
+pub struct Config {
+    /// Port number to listen on
+    #[clap(default_value = "8080")]
+    pub port: u16,
+
+    /// Base URL for the client
+    #[clap(default_value = "http://localhost:8332")]
+    pub base_url: String,
+
+    /// ZMQ endpoint
+    #[clap(default_value = "tcp://127.0.0.1:29000")]
+    pub zmq_endpoint: String,
+}
 
 // Our global state to track topic subscribers
 pub struct TopicRegistry {
@@ -59,50 +76,22 @@ impl TopicRegistry {
 }
 
 // The actual async implementation
-pub async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse command line arguments for port
-    let args: Vec<String> = std::env::args().collect();
-    let port = if args.len() > 1 {
-        match args[1].parse::<u16>() {
-            Ok(p) => p,
-            Err(_) => {
-                eprintln!("Invalid port number, using default 8080");
-                8080
-            }
-        }
-    } else {
-        8080
-    };
-
-    // Get base URL for the Client, default to localhost:8332 if not provided
-    let base_url = if args.len() > 2 {
-        args[2].clone()
-    } else {
-        String::from("http://localhost:8332")
-    };
-
-    // Get ZMQ endpoint if provided
-    let zmq_endpoint = if args.len() > 3 {
-        args[3].clone()
-    } else {
-        String::from("tcp://127.0.0.1:29000")
-    };
-
-    let addr = format!("0.0.0.0:{}", port);
+pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>> {
+    let addr = format!("0.0.0.0:{}", config.port);
     let listener = TcpListener::bind(&addr).await?;
     println!("WebSocket server listening on: {}", addr);
-    println!("Client connecting to: {}", base_url);
-    println!("ZMQ subscriber listening on: {}", zmq_endpoint);
+    println!("Client connecting to: {}", config.base_url);
+    println!("ZMQ subscriber listening on: {}", config.zmq_endpoint);
 
     // Create our shared topic registry
     let topic_registry = Arc::new(Mutex::new(TopicRegistry::new()));
 
     // Create our shared client - no need for Mutex since methods only take &self
-    let client = Arc::new(Node::new(base_url));
+    let client = Arc::new(Node::new(config.base_url));
 
     // Start ZMQ listener
     let registry_clone = topic_registry.clone();
-    let zmq_endpoint_clone = zmq_endpoint.clone();
+    let zmq_endpoint_clone = config.zmq_endpoint.clone();
     tokio::spawn(async move {
         if let Err(e) = zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone).await {
             eprintln!("Error in ZMQ listener: {}", e);

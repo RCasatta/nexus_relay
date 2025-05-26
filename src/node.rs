@@ -1,10 +1,6 @@
-use elements::Address;
 use elements::OutPoint;
 use elements::{encode::Decodable, Transaction, Txid};
 use serde_json::Value;
-use std::ffi::OsStr;
-use std::str::FromStr;
-use tokio::runtime::Runtime;
 
 pub struct Node {
     client: reqwest::Client,
@@ -65,7 +61,6 @@ mod tests {
     use bitcoind::bitcoincore_rpc::RpcApi;
     use bitcoind::{BitcoinD, Conf};
     use elements::encode::Decodable;
-    use elements::Txid;
     use elements::{Address, BlockHash};
     use serde_json::Value;
     use std::env;
