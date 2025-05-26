@@ -2,6 +2,7 @@ use crate::message::{Message, MessageType};
 use crate::TopicRegistry;
 use elements::encode::Decodable;
 use futures_util::StreamExt;
+use log::{error, info};
 use std::sync::{Arc, Mutex};
 use tmq::{subscribe, Context, Multipart};
 
@@ -19,6 +20,8 @@ pub fn process_zmq_message(
     if topic == b"rawtx" {
         let tx = elements::Transaction::consensus_decode(tx)?;
         let txid = tx.txid().to_string();
+
+        log::info!("Processing ZMQ message with txid: {}", txid);
 
         for out in tx.output {
             if let Some(addr) = elements::Address::from_script(
@@ -39,7 +42,7 @@ pub fn process_zmq_message(
                     // Publish using the address as the topic
                     registry.publish(&address_str, message);
                 } else {
-                    eprintln!("Failed to lock registry");
+                    error!("Failed to lock registry");
                 }
             }
         }
@@ -59,18 +62,18 @@ pub async fn start_zmq_listener(
     let socket_builder = socket_builder.connect(endpoint)?;
     let mut socket = socket_builder.subscribe(b"rawtx").unwrap();
 
-    println!("Async ZMQ subscriber listening on {}", endpoint);
+    info!("Async ZMQ subscriber listening on {}", endpoint);
 
     // Process messages asynchronously
     while let Some(msg) = socket.next().await {
         match msg {
             Ok(multipart) => {
                 if let Err(e) = process_zmq_message(multipart, &registry) {
-                    eprintln!("Error processing ZMQ message: {}", e);
+                    error!("Error processing ZMQ message: {}", e);
                 }
             }
             Err(e) => {
-                eprintln!("Error receiving ZMQ message: {}", e);
+                error!("Error receiving ZMQ message: {}", e);
             }
         }
     }

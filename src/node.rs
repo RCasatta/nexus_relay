@@ -1,5 +1,6 @@
 use elements::OutPoint;
 use elements::{encode::Decodable, Transaction, Txid};
+use log::info;
 use serde_json::Value;
 
 pub struct Node {
@@ -39,7 +40,7 @@ impl Node {
         let url = format!("{base}/rest/getutxos/checkmempool/{outpoint_str}.json");
 
         let json: Value = self.client.get(&url).send().await?.json().await?;
-        println!("{:?}", json);
+        info!("{:?}", json);
         Ok(json)
     }
 
