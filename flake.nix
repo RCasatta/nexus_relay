@@ -51,23 +51,13 @@
             elementsd # Added elementsd for testing
           ];
           
-          # Set environment variables for OpenSSL and elements
-          shellHook = ''
-            echo "NexusRelay development environment"
-            echo "Use 'cargo build' to build the project"
-            echo "Use 'cargo run' to run the server"
-            echo "Use 'cargo2nix' to regenerate the Cargo.nix file after updating dependencies"
-            echo "Use 'elements{d,-cli}' for elements"
-            echo "Use 'websocat' to test WebSocket connections"
-
-            # Export environment variables
-            export ELEMENTSD_EXEC="${pkgs.elementsd}/bin/elementsd"
-            
-            # OpenSSL environment variables
-            export OPENSSL_DIR="${pkgs.openssl.dev}"
-            export OPENSSL_LIB_DIR="${pkgs.openssl.out}/lib"
-            export PKG_CONFIG_PATH="${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH"
-          '';
+          # Set environment variables the Nix way
+          env = {
+            ELEMENTSD_EXEC = "${pkgs.elementsd}/bin/elementsd";
+            OPENSSL_DIR = "${pkgs.openssl.dev}";
+            OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+            PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
+          };
         };
       });
 } 
