@@ -32,11 +32,8 @@ pub fn process_zmq_message(
                 let address_str = addr.to_string();
 
                 if let Ok(mut registry) = registry.lock() {
-                    // Use the txid as the content
-                    let content = txid.clone();
-
                     // Create a message to publish
-                    let message = Message::new(MessageType::Result, None, &content);
+                    let message = Message::new(MessageType::Result, None, &address_str);
 
                     log::info!("Publishing message to address: {}", address_str);
                     // Publish using the address as the topic
@@ -166,6 +163,6 @@ mod tests {
         let message = received_message.unwrap();
         let parsed = Message::parse(&message).unwrap();
         assert_eq!(parsed.type_, MessageType::Result);
-        assert_eq!(parsed.content(), txid);
+        assert_eq!(parsed.content(), address);
     }
 }
