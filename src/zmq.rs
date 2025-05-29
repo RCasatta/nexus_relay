@@ -2,7 +2,6 @@ use crate::message::{Message, MessageType};
 use crate::{Network, TopicRegistry};
 use elements::encode::Decodable;
 use futures_util::StreamExt;
-use log::{error, info};
 use std::sync::{Arc, Mutex};
 use tmq::{subscribe, Context, Multipart};
 
@@ -22,7 +21,7 @@ pub fn process_zmq_message(
         let tx = elements::Transaction::consensus_decode(tx)?;
         let txid = tx.txid().to_string();
 
-        log::info!("Processing ZMQ message with txid: {}", txid);
+        log::debug!("Processing ZMQ message with txid: {}", txid);
 
         for out in tx.output {
             if let Some(addr) =
@@ -35,11 +34,14 @@ pub fn process_zmq_message(
                     // Create a message to publish
                     let message = Message::new(MessageType::Result, None, &address_str);
 
-                    log::info!("Publishing message to address: {}", address_str);
+                    log::debug!("Publishing message to address: {}", address_str);
                     // Publish using the address as the topic
-                    registry.publish(&address_str, message);
+                    let sent_count = registry.publish(&address_str, message);
+                    if sent_count > 0 {
+                        log::info!("Sent {} messages to address: {}", sent_count, address_str);
+                    }
                 } else {
-                    error!("Failed to lock registry");
+                    log::error!("Failed to lock registry");
                 }
             }
         }
@@ -60,18 +62,18 @@ pub async fn start_zmq_listener(
     let socket_builder = socket_builder.connect(endpoint)?;
     let mut socket = socket_builder.subscribe(b"rawtx").unwrap();
 
-    info!("Async ZMQ subscriber listening on {}", endpoint);
+    log::info!("Async ZMQ subscriber listening on {}", endpoint);
 
     // Process messages asynchronously
     while let Some(msg) = socket.next().await {
         match msg {
             Ok(multipart) => {
                 if let Err(e) = process_zmq_message(multipart, &registry, &network) {
-                    error!("Error processing ZMQ message: {}", e);
+                    log::error!("Error processing ZMQ message: {}", e);
                 }
             }
             Err(e) => {
-                error!("Error receiving ZMQ message: {}", e);
+                log::error!("Error receiving ZMQ message: {}", e);
             }
         }
     }
