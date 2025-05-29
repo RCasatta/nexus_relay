@@ -95,7 +95,7 @@ impl fmt::Display for Error {
     }
 }
 
-impl<'a> fmt::Display for Message<'a> {
+impl fmt::Display for Message<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}||", self.type_)?; // type and version
         if let Some(random_id) = self.random_id {
@@ -198,7 +198,7 @@ impl<'a> Message<'a> {
     }
 
     pub fn proposal(&self) -> Result<LiquidexProposal<Unvalidated>, Error> {
-        Ok(LiquidexProposal::from_str(self.content).map_err(|_| Error::InvalidProposal)?)
+        LiquidexProposal::from_str(self.content).map_err(|_| Error::InvalidProposal)
     }
 }
 

@@ -83,6 +83,12 @@ pub struct TopicRegistry {
     topics: HashMap<String, Vec<mpsc::UnboundedSender<String>>>,
 }
 
+impl Default for TopicRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TopicRegistry {
     pub fn new() -> Self {
         Self {
@@ -94,7 +100,7 @@ impl TopicRegistry {
     pub fn subscribe(&mut self, topic: String, sender: mpsc::UnboundedSender<String>) {
         self.topics
             .entry(topic)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(sender);
     }
 
@@ -103,19 +109,19 @@ impl TopicRegistry {
         let subscribers = self
             .topics
             .entry(topic.to_string())
-            .or_insert_with(Vec::new);
+            .or_default();
         let mut sent_count = 0;
 
         // Remove subscribers that are closed
         subscribers.retain(|sender| {
-            let is_open = match sender.send(message.to_string()) {
+            
+            match sender.send(message.to_string()) {
                 Ok(_) => {
                     sent_count += 1;
                     true
                 }
                 Err(_) => false, // Receiver was dropped
-            };
-            is_open
+            }
         });
 
         sent_count
@@ -172,12 +178,12 @@ pub async fn process_message<'a>(
     match message_request.type_ {
         MessageType::Publish => {
             let (topic, content) = message_request.topic_content()?;
-            let message_to_subscriber = Message::new(MessageType::Result, None, &content);
+            let message_to_subscriber = Message::new(MessageType::Result, None, content);
 
             // Lock the mutex only when needed and release it immediately
             let sent_count = {
                 let mut registry_guard = registry.lock().unwrap();
-                registry_guard.publish(&topic, message_to_subscriber)
+                registry_guard.publish(topic, message_to_subscriber)
             };
 
             info!(
