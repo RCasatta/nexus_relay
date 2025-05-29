@@ -734,7 +734,7 @@ dependencies = [
 [[package]]
 name = "elements"
 version = "0.25.2"
-source = "git+https://github.com/ElementsProject/rust-elements?branch=master#378e753bb26c08705045da6b182523c95cc6f36b"
+source = "git+https://github.com/ElementsProject/rust-elements?rev=378e753bb26c08705045da6b182523c95cc6f36b#378e753bb26c08705045da6b182523c95cc6f36b"
 dependencies = [
  "bech32 0.11.0",
  "bitcoin",
@@ -1651,7 +1651,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 [[package]]
 name = "lwk_common"
 version = "0.9.0"
-source = "git+https://github.com/Blockstream/lwk?branch=master#7cb3118aa7645955c05b2c871be4ee2801dd826a"
+source = "git+https://github.com/Blockstream/lwk?rev=ba7338115a2ffa0d99e327a67f6ba02b65cb074d#ba7338115a2ffa0d99e327a67f6ba02b65cb074d"
 dependencies = [
  "base64 0.21.7",
  "elements",
@@ -1666,7 +1666,7 @@ dependencies = [
 [[package]]
 name = "lwk_wollet"
 version = "0.9.0"
-source = "git+https://github.com/Blockstream/lwk?branch=master#7cb3118aa7645955c05b2c871be4ee2801dd826a"
+source = "git+https://github.com/Blockstream/lwk?rev=ba7338115a2ffa0d99e327a67f6ba02b65cb074d#ba7338115a2ffa0d99e327a67f6ba02b65cb074d"
 dependencies = [
  "aes-gcm-siv",
  "age",

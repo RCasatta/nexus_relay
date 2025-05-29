@@ -31,6 +31,6 @@ bitcoind = { version = "0.36.0" }
 hex = "*"
 
 [patch.crates-io]
-lwk_wollet = { git = "https://github.com/Blockstream/lwk", branch = "master" }
-lwk_common = { git = "https://github.com/Blockstream/lwk", branch = "master" }
-elements = { git = "https://github.com/ElementsProject/rust-elements", branch = "master" }
+lwk_wollet = { git = "https://github.com/Blockstream/lwk", rev = "ba7338115a2ffa0d99e327a67f6ba02b65cb074d" }
+lwk_common = { git = "https://github.com/Blockstream/lwk", rev = "ba7338115a2ffa0d99e327a67f6ba02b65cb074d" }
+elements = { git = "https://github.com/ElementsProject/rust-elements", rev = "378e753bb26c08705045da6b182523c95cc6f36b" }
