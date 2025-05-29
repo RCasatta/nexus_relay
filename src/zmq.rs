@@ -140,9 +140,6 @@ mod tests {
         // Verify the processing succeeded
         assert!(result.is_ok());
 
-        // Get the txid
-        let txid = tx.txid().to_string();
-
         // Check if a message was published
         let (sender, receiver) = std::sync::mpsc::channel::<String>();
 
