@@ -140,6 +140,10 @@ impl<'a> Message<'a> {
         }
     }
 
+    pub fn ack(random_id: Option<u64>) -> Self {
+        Message::new(MessageType::Ack, random_id, "")
+    }
+
     pub fn parse(s: &'a str) -> Result<Self, Error> {
         let mut parts = s.splitn(5, '|');
 

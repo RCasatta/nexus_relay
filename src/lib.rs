@@ -222,8 +222,7 @@ pub async fn process_message<'a>(
                 registry_guard.subscribe(topic, client_tx_clone.clone());
             }
 
-            let message_response =
-                Message::new(MessageType::Result, message_request.random_id, "subscribed");
+            let message_response = Message::ack(message_request.random_id);
             Ok(message_response)
         }
         MessageType::Result => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
@@ -398,7 +397,7 @@ mod tests {
             .unwrap();
 
         // Verify response
-        assert_eq!(response.to_string(), "RESULT||1|10|subscribed");
+        assert_eq!(response.to_string(), "ACK||1||");
 
         // TODO verify the send to subscribers
     }
@@ -457,10 +456,7 @@ mod tests {
             .unwrap();
 
         // Verify response
-        assert_eq!(
-            message_response.to_string(),
-            format!("RESULT||{id2}|10|subscribed")
-        );
+        assert_eq!(message_response.to_string(), format!("ACK||{id2}||"));
 
         // Publish the proposal as another client
         let (client_tx2, _client_rx2) = mpsc::unbounded_channel();
