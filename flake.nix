@@ -4,12 +4,22 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # Add rust-overlay for better Rust toolchain management
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs {
+          inherit system overlays;
+        };
+        
+        # Create a custom Rust toolchain with the components we need
+        rustToolchain = pkgs.rust-bin.stable."1.82.0".default.override {
+          extensions = [ "rust-src" "rust-analyzer" ];
+        };
         
         # Python environment with zmq
         pythonWithZmq = pkgs.python3.withPackages (ps: [ ps.pyzmq ]);
@@ -44,10 +54,8 @@
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            cargo
-            rustc
-            rustfmt
-            clippy
+            # Use our custom Rust toolchain that includes rust-src
+            rustToolchain
             pkg-config
             openssl
             openssl.dev
@@ -62,6 +70,8 @@
             OPENSSL_DIR = "${pkgs.openssl.dev}";
             OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
             PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
+            # Make sure rust-analyzer can find the Rust sources
+            RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
           };
         };
       });
