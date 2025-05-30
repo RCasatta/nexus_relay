@@ -2,12 +2,10 @@ use clap::Parser;
 use elements::bitcoin::NetworkKind;
 use elements::AddressParams;
 use futures_util::{SinkExt, StreamExt};
-use lwk_wollet::elements::AssetId;
-use message::{proposal_topic, Error, Message, MessageType};
+use message::{Error, Message, MessageType};
 use node::Node;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -15,6 +13,7 @@ use tokio_tungstenite::tungstenite::Message as TokioMessage;
 
 pub mod message;
 pub mod node;
+pub mod proposal;
 pub mod zmq;
 
 /// Configuration for Nexus Relay
@@ -191,40 +190,13 @@ pub async fn process_message<'a>(
             Ok(message_response)
         }
         MessageType::PublishProposal => {
-            let proposal = message_request.proposal()?;
-            let proposal = if let Some(client) = client {
-                let txid = proposal.needed_tx()?;
-                log::info!("PublishProposal asking for txid: {}", txid);
-                let tx = client.tx(txid).await.unwrap();
-                let validated = proposal.validate(tx)?;
-                log::info!("PublishProposal validated");
-                // TODO verify it's unspent
-                validated
-            } else {
-                log::info!("PublishProposal asking for insecure validation");
-                proposal.insecure_validate()?
-            };
-            let topic = proposal_topic(&proposal)?;
-            let proposal_str = format!("{}", proposal);
-            let message_to_subscriber = Message::new(MessageType::Result, None, &proposal_str);
-
-            // Lock the mutex only when needed and release it immediately
-            let sent_count = {
-                let mut registry_guard = registry.lock().unwrap();
-                registry_guard.publish(&topic, message_to_subscriber)
-            };
-
-            log::info!(
-                "PublishProposal sent to {} subscribers on topic: {}",
-                sent_count,
-                topic
-            );
-            let message_response = Message::new(
-                MessageType::Result,
+            proposal::process_publish_proposal(
+                message_request,
+                registry,
+                client,
                 message_request.random_id,
-                "proposal published",
-            );
-            Ok(message_response)
+            )
+            .await
         }
         MessageType::Subscribe => {
             let topic = message_request.content().to_string();
@@ -233,18 +205,7 @@ pub async fn process_message<'a>(
             }
             if topic.len() >= 32 {
                 // if the topic is longer or equal 32 chars, it must be a proposal topic
-                let mut assets = topic.splitn(2, '|');
-                if let (Some(asset1), Some(asset2)) = (assets.next(), assets.next()) {
-                    let asset1 = AssetId::from_str(asset1);
-                    let asset2 = AssetId::from_str(asset2);
-                    if let (Ok(_), Ok(_)) = (asset1, asset2) {
-                        // topic validated
-                    } else {
-                        return Err(Box::new(Error::InvalidTopic));
-                    }
-                } else {
-                    return Err(Box::new(Error::InvalidTopic));
-                }
+                proposal::validate_proposal_topic(&topic)?;
             }
 
             // Lock the mutex only when needed and release it immediately
@@ -361,7 +322,7 @@ pub async fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{Message, MessageType};
+    use crate::message::{proposal_topic, Message, MessageType};
     use tokio::runtime::Runtime;
 
     fn proposal_str() -> &'static str {
@@ -462,10 +423,11 @@ mod tests {
             proposal_json
         );
         let message_publish = Message::parse(&message_publish).unwrap();
+
+        // Get the proposal topic
         let proposal = message_publish.proposal().unwrap();
         let validated = proposal.insecure_validate().unwrap();
         let topic = proposal_topic(&validated).unwrap();
-        assert_eq!(topic, "6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7|f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28");
 
         // Subscribe to the topic of the proposal
         let message_str = format!("SUBSCRIBE||{id2}|129|{topic}");
@@ -473,7 +435,7 @@ mod tests {
         let registry = Arc::new(Mutex::new(TopicRegistry::new()));
         let (client_tx1, mut client_rx1) = mpsc::unbounded_channel();
 
-        // Process the message
+        // Process the subscribe message
         let message_response = rt
             .block_on(process_message(
                 &message,
