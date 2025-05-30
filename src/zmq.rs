@@ -1,5 +1,5 @@
 use crate::message::{Message, MessageType};
-use crate::{Network, TopicRegistry};
+use crate::{Network, Topic, TopicRegistry};
 use elements::encode::Decodable;
 use futures_util::StreamExt;
 use std::sync::{Arc, Mutex};
@@ -36,7 +36,8 @@ pub fn process_zmq_message(
 
                     log::debug!("Publishing message to address: {}", address_str);
                     // Publish using the address as the topic
-                    let sent_count = registry.publish(&address_str, message);
+                    let topic = Topic::Validated(address_str.to_string());
+                    let sent_count = registry.publish(topic, message);
                     if sent_count > 0 {
                         log::info!("Sent {} messages to address: {}", sent_count, address_str);
                     }
@@ -131,7 +132,7 @@ mod tests {
         // Subscribe to the address
         {
             let mut registry_guard = registry.lock().unwrap();
-            registry_guard.subscribe(address.to_string(), tx_sender);
+            registry_guard.subscribe(Topic::Validated(address.to_string()), tx_sender);
         }
 
         // Process the message

@@ -4,7 +4,6 @@ use elements::AddressParams;
 use futures_util::{SinkExt, StreamExt};
 use message::{Error, Message, MessageType};
 use node::Node;
-use proposal::validate_proposal_topic;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -79,7 +78,13 @@ impl Network {
 
 // Our global state to track topic subscribers
 pub struct TopicRegistry {
-    topics: HashMap<String, Vec<mpsc::UnboundedSender<String>>>,
+    topics: HashMap<Topic, Vec<mpsc::UnboundedSender<String>>>,
+}
+
+#[derive(Eq, PartialEq, Hash)]
+pub enum Topic {
+    Validated(String),
+    Unvalidated(String),
 }
 
 impl Default for TopicRegistry {
@@ -96,13 +101,13 @@ impl TopicRegistry {
     }
 
     // Add a subscriber to a topic
-    pub fn subscribe(&mut self, topic: String, sender: mpsc::UnboundedSender<String>) {
+    pub fn subscribe(&mut self, topic: Topic, sender: mpsc::UnboundedSender<String>) {
         self.topics.entry(topic).or_default().push(sender);
     }
 
     // Send a message to all subscribers of a topic
-    pub fn publish(&mut self, topic: &str, message: Message) -> usize {
-        let subscribers = self.topics.entry(topic.to_string()).or_default();
+    pub fn publish(&mut self, topic: Topic, message: Message) -> usize {
+        let subscribers = self.topics.entry(topic).or_default();
         let mut sent_count = 0;
 
         // Remove subscribers that are closed
@@ -168,7 +173,7 @@ pub async fn process_message<'a>(
     client_tx_clone: &mpsc::UnboundedSender<String>,
 ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
     match message_request.type_ {
-        MessageType::Publish => {
+        MessageType::PublishAny => {
             let (topic, content) = message_request.topic_content()?;
 
             let message_to_subscriber = Message::new(MessageType::Result, None, content);
@@ -176,6 +181,7 @@ pub async fn process_message<'a>(
             // Lock the mutex only when needed and release it immediately
             let sent_count = {
                 let mut registry_guard = registry.lock().unwrap();
+                let topic = Topic::Unvalidated(topic.to_string());
                 registry_guard.publish(topic, message_to_subscriber)
             };
 
@@ -212,6 +218,7 @@ pub async fn process_message<'a>(
             // Lock the mutex only when needed and release it immediately
             {
                 let mut registry_guard = registry.lock().unwrap();
+                let topic = Topic::Validated(topic);
                 registry_guard.subscribe(topic, client_tx_clone.clone());
             }
 
@@ -227,7 +234,7 @@ pub async fn process_message<'a>(
         }
         MessageType::Pong => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
         MessageType::PublishPset => Err(Box::new(Error::NotImplemented)),
-        MessageType::PublishAny => Err(Box::new(Error::NotImplemented)),
+        MessageType::Publish => Err(Box::new(Error::NotImplemented)),
         MessageType::SubscribeAny => Err(Box::new(Error::NotImplemented)),
         MessageType::Ack => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
     }

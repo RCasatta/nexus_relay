@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::message::{proposal_topic, Error, Message, MessageType};
 use crate::node::Node;
-use crate::TopicRegistry;
+use crate::{Topic, TopicRegistry};
 
 /// Process a publish proposal message
 pub async fn process_publish_proposal<'a>(
@@ -33,7 +33,8 @@ pub async fn process_publish_proposal<'a>(
     // Lock the mutex only when needed and release it immediately
     let sent_count = {
         let mut registry_guard = registry.lock().unwrap();
-        registry_guard.publish(&topic, message_to_subscriber)
+        let topic = Topic::Validated(topic.clone());
+        registry_guard.publish(topic, message_to_subscriber)
     };
 
     log::info!(
