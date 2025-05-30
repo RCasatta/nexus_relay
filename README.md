@@ -81,7 +81,8 @@ To publish a generic string on any given topic like
 PUBLISH||XYZGBH|25|topic|{"message":"hello"}
 ```
 
-The publish message content must start with a topic followed by a separator `|`. The topic can be max 64 chars.
+The publish message content must start with a topic followed by a separator `|`. The generic topic cannot be longer or equal 32 chars.
+Note you can have specific reserved topics, pset/proposals/address that are longer equal or longer than 32 chars.
 
 ### PUBLISH_PROPOSAL
 
@@ -116,7 +117,7 @@ Where `$PROPOSAL_JSON` has the following format (removed tx hex for brevity):
 
 The topic of this proposal is automatically inferred by the proposal json and will be `6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7:f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28`
 
-Note that in this case the topic is longer than the 64 chars enforced by the generic publish so that clients subscribing to this topic has reasonable guarantee there have been some validation on the proposal by the server. Validations include:
+Note that in this case the topic is longer than the 32 chars enforced by the generic publish so that clients subscribing to this topic has reasonable guarantee there have been some validation on the proposal by the server. Validations include:
 
 - Input exists and it's unspent
 - Liquidex validation rules (see method [validate](https://github.com/Blockstream/lwk/blob/16ec78caf4ba212d38de89446dc519deaba61567/lwk_wollet/src/liquidex.rs#L227) on LiqudexProposal)

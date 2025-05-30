@@ -231,8 +231,8 @@ pub async fn process_message<'a>(
             if topic.is_empty() {
                 return Err(Box::new(Error::MissingTopic));
             }
-            if topic.len() > 64 {
-                // if the topic is longer than 64 chars, it must be a proposal topic
+            if topic.len() >= 32 {
+                // if the topic is longer or equal 32 chars, it must be a proposal topic
                 let mut assets = topic.splitn(2, '|');
                 if let (Some(asset1), Some(asset2)) = (assets.next(), assets.next()) {
                     let asset1 = AssetId::from_str(asset1);
