@@ -4,6 +4,7 @@ use elements::AddressParams;
 use futures_util::{SinkExt, StreamExt};
 use message::{Error, Message, MessageType};
 use node::Node;
+use proposal::validate_proposal_topic;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -169,6 +170,7 @@ pub async fn process_message<'a>(
     match message_request.type_ {
         MessageType::Publish => {
             let (topic, content) = message_request.topic_content()?;
+
             let message_to_subscriber = Message::new(MessageType::Result, None, content);
 
             // Lock the mutex only when needed and release it immediately
@@ -203,6 +205,9 @@ pub async fn process_message<'a>(
             if topic.is_empty() {
                 return Err(Box::new(Error::MissingTopic));
             }
+            if topic.len() > 129 {
+                return Err(Box::new(Error::InvalidTopic));
+            }
 
             // Lock the mutex only when needed and release it immediately
             {
@@ -222,6 +227,9 @@ pub async fn process_message<'a>(
         }
         MessageType::Pong => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
         MessageType::PublishPset => Err(Box::new(Error::NotImplemented)),
+        MessageType::PublishAny => Err(Box::new(Error::NotImplemented)),
+        MessageType::SubscribeAny => Err(Box::new(Error::NotImplemented)),
+        MessageType::Ack => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
     }
 }
 

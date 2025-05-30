@@ -14,26 +14,32 @@ pub struct Message<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub enum MessageType {
     Publish,
+    PublishAny,
     PublishProposal,
     PublishPset,
     Subscribe,
+    SubscribeAny,
     Result,
     Error,
     Ping,
     Pong,
+    Ack,
 }
 
 impl fmt::Display for MessageType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MessageType::Publish => write!(f, "PUBLISH"),
+            MessageType::PublishAny => write!(f, "PUBLISH_ANY"),
             MessageType::PublishProposal => write!(f, "PUBLISH_PROPOSAL"),
             MessageType::PublishPset => write!(f, "PUBLISH_PSET"),
             MessageType::Subscribe => write!(f, "SUBSCRIBE"),
+            MessageType::SubscribeAny => write!(f, "SUBSCRIBE_ANY"),
             MessageType::Result => write!(f, "RESULT"),
             MessageType::Error => write!(f, "ERROR"),
             MessageType::Ping => write!(f, "PING"),
             MessageType::Pong => write!(f, "PONG"),
+            MessageType::Ack => write!(f, "ACK"),
         }
     }
 }
@@ -46,11 +52,14 @@ impl FromStr for MessageType {
             "PUBLISH" => Ok(MessageType::Publish),
             "PUBLISH_PROPOSAL" => Ok(MessageType::PublishProposal),
             "PUBLISH_PSET" => Ok(MessageType::PublishPset),
+            "PUBLISH_ANY" => Ok(MessageType::PublishAny),
             "SUBSCRIBE" => Ok(MessageType::Subscribe),
+            "SUBSCRIBE_ANY" => Ok(MessageType::SubscribeAny),
             "RESULT" => Ok(MessageType::Result),
             "ERROR" => Ok(MessageType::Error),
             "PING" => Ok(MessageType::Ping),
             "PONG" => Ok(MessageType::Pong),
+            "ACK" => Ok(MessageType::Ack),
             _ => Err(Error::InvalidMessage),
         }
     }
@@ -220,13 +229,16 @@ mod tests {
         // Test all variants of MessageType for roundtrip conversion
         let types = vec![
             MessageType::Publish,
+            MessageType::PublishAny,
             MessageType::PublishProposal,
             MessageType::PublishPset,
             MessageType::Subscribe,
+            MessageType::SubscribeAny,
             MessageType::Result,
             MessageType::Error,
             MessageType::Ping,
             MessageType::Pong,
+            MessageType::Ack,
         ];
 
         for msg_type in types {

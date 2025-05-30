@@ -5,9 +5,11 @@ A WebSocket server with a simple publish/subscribe text based message protocol u
 - Publish Liquidex swap proposals and to subscribe to receive proposals from others. To make and take proposal you can use [LWK](https://github.com/blockstream/lwk)
 - Share PSETs for signing in multisignature setups.
 - Create multisignature setups.
+- Listen for transaction activity on addresses.
 
 Note in the most generic case this is a simple relay mechanism or a "dumb pipe" providing a transport layer which can be encrypted via ssl but it leaves other security implementation and details to the clients.
-In some specific cases, like publishing a Liquidex Proposal, there are some validations provided by the server.
+
+In some specific cases, like publishing a Liquidex Proposal, a PSET or subscribbing to address, there is some validation provided by the server.
 
 ## Building and Running
 
@@ -30,15 +32,17 @@ The server uses a simple text-based protocol, the message follow this structure:
 
 The following message types are possible, specific details for message type in the following section:
 
-* PUBLISH
+* PUBLISH_ANY (unimplemented)
 * PUBLISH_PROPOSAL (partially implemented)
 * PUBLISH_PSET (unimplemented)
+* SUBSCRIBE_ANY (unimplemented)
 * SUBSCRIBE
  * PROPOSAL: `buy_asset_id|sell_asset_id`
  * PSET: `wallet_id` (unimplemented)
  * ADDRESS: `address` unconfidential address
 * UNSUBSCRIBE (unimplemented)
 * RESULT
+* ACK
 * ERROR
 * PING
 * PONG
@@ -73,7 +77,7 @@ Subscribe: `SUBSCRIBE||1|8|mytopic1`
 
 ## Messages
 
-### PUBLISH
+### PUBLISH_ANY
 
 To publish a generic string on any given topic like
 
@@ -122,14 +126,22 @@ Note that in this case the topic is longer than the 32 chars enforced by the gen
 - Input exists and it's unspent
 - Liquidex validation rules (see method [validate](https://github.com/Blockstream/lwk/blob/16ec78caf4ba212d38de89446dc519deaba61567/lwk_wollet/src/liquidex.rs#L227) on LiqudexProposal)
 
-### SUBSCRIBE
+
+### SUBSCRIBE_ANY
 
 The clients can subscribe to a topic which is a just a string.
-However there are topics with suggested format:
+No validation is done by the relay and everything published with PUBLISH_ANY with the same topic is forwarded to subscibers
 
-* Liquidex: Use topic `sell_asset_id|buy_asset_id` to receive proposal selling/buying the specified asset ids
-* Psets: Use topic `wallet_id` as specified in https://github.com/ElementsProject/ELIPs/pull/25 to receive PSETs published relative to the `wallet_id`. Note the server don't and can't guarantee pset received are generated from `wallet_id` and must be validated client side, for example validating that in the PSET there are already signature from other member of the `wallet_id` and verifying PSET outputs.
-* Setups: Use a `random_string` as topic for custom coordination such as multisig setup
+### SUBSCRIBE
+
+The clients can subscribe to a specific topics that have some validation from the relay.
+
+* Liquidex: Use topic `<sell_asset_id>|<buy_asset_id>` (129 characters including separator) to receive proposal selling/buying the specified asset ids
+* Psets: Use topic `<wallet_id>` as specified in https://github.com/ElementsProject/ELIPs/pull/25 to receive PSETs published relative to the `wallet_id`. Note the server don't and can't guarantee pset received are generated from `wallet_id` and must be validated client side, for example validating that in the PSET there are already signature from other member of the `wallet_id` and verifying PSET outputs.
+* Addresses: use topic `<unconfidential_address>` to be notified when the address is seen as output of a transaction entering the mempool.
+
+
+#### Subscibe Liquidex example
 
 For example if I am interested in buying LBTC with USDT in Liquid Mainnet:
 
