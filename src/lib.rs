@@ -203,10 +203,6 @@ pub async fn process_message<'a>(
             if topic.is_empty() {
                 return Err(Box::new(Error::MissingTopic));
             }
-            if topic.len() >= 32 {
-                // if the topic is longer or equal 32 chars, it must be a proposal topic
-                proposal::validate_proposal_topic(&topic)?;
-            }
 
             // Lock the mutex only when needed and release it immediately
             {
