@@ -36,7 +36,7 @@ The following message types are possible, specific details for message type in t
 * SUBSCRIBE
  * PROPOSAL: `buy_asset_id|sell_asset_id`
  * PSET: `wallet_id` (unimplemented)
- * ADDRESS: `address` (unimplemented)
+ * ADDRESS: `address` unconfidential address
 * UNSUBSCRIBE (unimplemented)
 * RESULT
 * ERROR

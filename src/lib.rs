@@ -2,7 +2,6 @@ use clap::Parser;
 use elements::bitcoin::NetworkKind;
 use elements::AddressParams;
 use futures_util::{SinkExt, StreamExt};
-use log::{error, info};
 use lwk_wollet::elements::AssetId;
 use message::{proposal_topic, Error, Message, MessageType};
 use node::Node;
@@ -98,23 +97,16 @@ impl TopicRegistry {
 
     // Add a subscriber to a topic
     pub fn subscribe(&mut self, topic: String, sender: mpsc::UnboundedSender<String>) {
-        self.topics
-            .entry(topic)
-            .or_default()
-            .push(sender);
+        self.topics.entry(topic).or_default().push(sender);
     }
 
     // Send a message to all subscribers of a topic
     pub fn publish(&mut self, topic: &str, message: Message) -> usize {
-        let subscribers = self
-            .topics
-            .entry(topic.to_string())
-            .or_default();
+        let subscribers = self.topics.entry(topic.to_string()).or_default();
         let mut sent_count = 0;
 
         // Remove subscribers that are closed
         subscribers.retain(|sender| {
-            
             match sender.send(message.to_string()) {
                 Ok(_) => {
                     sent_count += 1;
@@ -132,10 +124,10 @@ impl TopicRegistry {
 pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = TcpListener::bind(&addr).await?;
-    info!("WebSocket server listening on: {}", addr);
-    info!("Client connecting to: {}", config.base_url);
-    info!("ZMQ subscriber listening on: {}", config.zmq_endpoint);
-    info!("Using network: {:?}", config.network);
+    log::info!("WebSocket server listening on: {}", addr);
+    log::info!("Client connecting to: {}", config.base_url);
+    log::info!("ZMQ subscriber listening on: {}", config.zmq_endpoint);
+    log::info!("Using network: {:?}", config.network);
 
     // Create our shared topic registry
     let topic_registry = Arc::new(Mutex::new(TopicRegistry::new()));
@@ -151,7 +143,7 @@ pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>
         if let Err(e) =
             zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone, network_clone).await
         {
-            error!("Error in ZMQ listener: {}", e);
+            log::error!("Error in ZMQ listener: {}", e);
         }
     });
 
@@ -160,7 +152,7 @@ pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>
         let client_clone = client.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_connection(stream, addr, registry, client_clone).await {
-                error!("Error handling connection from {}: {}", addr, e);
+                log::error!("Error handling connection from {}: {}", addr, e);
             }
         });
     }
@@ -186,9 +178,10 @@ pub async fn process_message<'a>(
                 registry_guard.publish(topic, message_to_subscriber)
             };
 
-            info!(
+            log::info!(
                 "Message sent to {} subscribers on topic: {}",
-                sent_count, topic
+                sent_count,
+                topic
             );
             let message_response = Message::new(
                 MessageType::Result,
@@ -199,12 +192,16 @@ pub async fn process_message<'a>(
         }
         MessageType::PublishProposal => {
             let proposal = message_request.proposal()?;
-            let txid = proposal.needed_tx()?;
             let proposal = if let Some(client) = client {
+                let txid = proposal.needed_tx()?;
+                log::info!("PublishProposal asking for txid: {}", txid);
                 let tx = client.tx(txid).await.unwrap();
-                proposal.validate(tx)?
+                let validated = proposal.validate(tx)?;
+                log::info!("PublishProposal validated");
                 // TODO verify it's unspent
+                validated
             } else {
+                log::info!("PublishProposal asking for insecure validation");
                 proposal.insecure_validate()?
             };
             let topic = proposal_topic(&proposal)?;
@@ -217,9 +214,10 @@ pub async fn process_message<'a>(
                 registry_guard.publish(&topic, message_to_subscriber)
             };
 
-            info!(
-                "Message sent to {} subscribers on topic: {}",
-                sent_count, topic
+            log::info!(
+                "PublishProposal sent to {} subscribers on topic: {}",
+                sent_count,
+                topic
             );
             let message_response = Message::new(
                 MessageType::Result,
@@ -276,11 +274,11 @@ pub async fn handle_connection(
     registry: Arc<Mutex<TopicRegistry>>,
     client: Arc<Node>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Incoming connection from: {}", addr);
+    log::info!("Incoming connection from: {}", addr);
 
     // Upgrade connection to WebSocket
     let ws_stream = tokio_tungstenite::accept_async(stream).await?;
-    info!("WebSocket connection established: {}", addr);
+    log::info!("WebSocket connection established: {}", addr);
 
     // Create channel for sending messages to this client
     let (client_tx, mut client_rx) = mpsc::unbounded_channel();
@@ -307,7 +305,7 @@ pub async fn handle_connection(
         let msg = match result {
             Ok(msg) => msg,
             Err(e) => {
-                error!("Error receiving message from {}: {}", addr, e);
+                log::error!("Error receiving message from {}: {}", addr, e);
                 break;
             }
         };
@@ -349,7 +347,7 @@ pub async fn handle_connection(
         }
     }
 
-    info!("WebSocket connection closed: {}", addr);
+    log::info!("WebSocket connection closed: {}", addr);
 
     // Clean up by dropping the sender, which will cause the forward task to terminate
     drop(client_tx_clone);
