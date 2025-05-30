@@ -81,7 +81,7 @@ pub struct TopicRegistry {
     topics: HashMap<Topic, Vec<mpsc::UnboundedSender<String>>>,
 }
 
-#[derive(Eq, PartialEq, Hash)]
+#[derive(Eq, PartialEq, Hash, Debug)]
 pub enum Topic {
     Validated(String),
     Unvalidated(String),
@@ -174,28 +174,7 @@ pub async fn process_message<'a>(
 ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
     match message_request.type_ {
         MessageType::PublishAny => {
-            let (topic, content) = message_request.topic_content()?;
-
-            let message_to_subscriber = Message::new(MessageType::Result, None, content);
-
-            // Lock the mutex only when needed and release it immediately
-            let sent_count = {
-                let mut registry_guard = registry.lock().unwrap();
-                let topic = Topic::Unvalidated(topic.to_string());
-                registry_guard.publish(topic, message_to_subscriber)
-            };
-
-            log::info!(
-                "Message sent to {} subscribers on topic: {}",
-                sent_count,
-                topic
-            );
-            let message_response = Message::new(
-                MessageType::Result,
-                message_request.random_id,
-                "message published",
-            );
-            Ok(message_response)
+            process_publish_any(message_request, registry, message_request.random_id)
         }
         MessageType::PublishProposal => {
             proposal::process_publish_proposal(
@@ -435,13 +414,15 @@ mod tests {
         assert_eq!(err, "ERROR||1|13|Missing topic");
     }
 
-    #[test]
-    fn test_subscribe_publish() {
-        // Create a runtime
-        let rt = Runtime::new().unwrap();
+    #[tokio::test]
+    async fn test_subscribe_publish() {
+        env_logger::init();
 
-        let id1 = 12341234;
-        let id2 = 12341235;
+        let id1 = 0;
+        let id2 = 1;
+        let id3 = 2;
+        let id4 = 3;
+
         let proposal_json = proposal_str();
         let message_publish = format!(
             "PUBLISH_PROPOSAL||{id1}|{}|{}",
@@ -455,44 +436,139 @@ mod tests {
         let validated = proposal.insecure_validate().unwrap();
         let topic = proposal_topic(&validated).unwrap();
 
-        // Subscribe to the topic of the proposal
+        // Create registry
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+
+        // Create channels for all clients
+        let (client_subscribe_tx, mut client_subscribe_rx) = mpsc::unbounded_channel();
+        let (client_subscribe_any_tx, mut client_subscribe_any_rx) = mpsc::unbounded_channel();
+        let (client_publish_proposal_tx, _) = mpsc::unbounded_channel();
+        let (client_publish_any_tx, _) = mpsc::unbounded_channel();
+
+        // Step 1: Set up subscriptions first
+
+        // SUBSCRIBE client: Subscribe to the validated topic
         let message_str = format!("SUBSCRIBE||{id2}|129|{topic}");
         let message = Message::parse(&message_str).unwrap();
-        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
-        let (client_tx1, mut client_rx1) = mpsc::unbounded_channel();
 
-        // Process the subscribe message
-        let message_response = rt
-            .block_on(process_message(
-                &message,
-                registry.clone(),
-                None,
-                &client_tx1,
-            ))
-            .unwrap();
-
-        // Verify response
+        let message_response =
+            process_message(&message, registry.clone(), None, &client_subscribe_tx)
+                .await
+                .unwrap();
         assert_eq!(message_response.to_string(), format!("ACK||{id2}||"));
 
-        // Publish the proposal as another client
-        let (client_tx2, _client_rx2) = mpsc::unbounded_channel();
-        let message_response = rt
-            .block_on(process_message(
-                &message_publish,
-                registry,
-                None,
-                &client_tx2,
-            ))
-            .unwrap();
+        // SUBSCRIBE_ANY client: Subscribe to the same topic with SUBSCRIBE_ANY (unvalidated)
+        let message_str = format!("SUBSCRIBE_ANY||{id3}|129|{topic}");
+        let message = Message::parse(&message_str).unwrap();
+
+        let message_response =
+            process_message(&message, registry.clone(), None, &client_subscribe_any_tx)
+                .await
+                .unwrap();
+        assert_eq!(message_response.to_string(), format!("ACK||{id3}||"));
+
+        // Step 2: Test proposal publishing
+
+        // Publish the proposal
+        let message_response = process_message(
+            &message_publish,
+            registry.clone(),
+            None,
+            &client_publish_proposal_tx,
+        )
+        .await
+        .unwrap();
         assert_eq!(message_response.to_string(), format!("ACK||{id1}||"));
-        let message_received = client_rx1.blocking_recv().unwrap();
+
+        // SUBSCRIBE client should receive the proposal
+        let message_received = client_subscribe_rx.recv().await.unwrap();
+
         let parsed_message = Message::parse(&message_received).unwrap();
         assert_eq!(parsed_message.type_, MessageType::Result);
 
         // Parse both strings to ensure we compare JSON content, not formatting
         let json1: serde_json::Value = serde_json::from_str(parsed_message.content()).unwrap();
         let json2: serde_json::Value = serde_json::from_str(proposal_str()).unwrap();
-
         assert_eq!(json1, json2);
+
+        // SUBSCRIBE_ANY client should NOT receive the proposal
+        assert!(
+            client_subscribe_any_rx.try_recv().is_err(),
+            "SUBSCRIBE_ANY client incorrectly received the proposal"
+        );
+
+        // Publish a message with PUBLISH_ANY
+        let content = "Hello";
+        let publish_content = format!("{}|{}", topic, content);
+        let message_str = format!(
+            "PUBLISH_ANY||{id4}|{}|{}",
+            publish_content.len(),
+            publish_content
+        );
+        let message = Message::parse(&message_str).unwrap();
+
+        let message_response = process_message(&message, registry, None, &client_publish_any_tx)
+            .await
+            .unwrap();
+        assert_eq!(message_response.to_string(), format!("ACK||{id4}||"));
+
+        // SUBSCRIBE client should NOT receive the PUBLISH_ANY message
+        assert!(
+            client_subscribe_rx.try_recv().is_err(),
+            "SUBSCRIBE client incorrectly received the PUBLISH_ANY message"
+        );
+
+        // SUBSCRIBE_ANY client should receive the PUBLISH_ANY message
+        let message_received = client_subscribe_any_rx.recv().await.unwrap();
+
+        let parsed_message = Message::parse(&message_received).unwrap();
+        assert_eq!(parsed_message.type_, MessageType::Result);
+        assert_eq!(parsed_message.content(), content);
     }
+}
+
+/// Process a publish any message
+fn process_publish_any<'a>(
+    message_request: &'a Message<'a>,
+    registry: Arc<Mutex<TopicRegistry>>,
+    random_id: Option<u64>,
+) -> Result<Message<'a>, Box<dyn std::error::Error>> {
+    let (topic, content) = message_request.topic_content()?;
+
+    // Log the raw topic and content to help debug
+    log::debug!("PublishAny raw topic: '{}', content: '{}'", topic, content);
+
+    let message_to_subscriber = Message::new(MessageType::Result, None, content);
+
+    // Lock the mutex only when needed and release it immediately
+    let sent_count = {
+        let mut registry_guard = registry.lock().unwrap();
+        let unvalidated_topic = Topic::Unvalidated(topic.to_string());
+
+        // Log the registered topics for comparison
+        for (existing_topic, subscribers) in &registry_guard.topics {
+            match existing_topic {
+                Topic::Unvalidated(t) => log::debug!(
+                    "Found registered Unvalidated topic: '{}' with {} subscribers",
+                    t,
+                    subscribers.len()
+                ),
+                Topic::Validated(t) => log::debug!(
+                    "Found registered Validated topic: '{}' with {} subscribers",
+                    t,
+                    subscribers.len()
+                ),
+            }
+        }
+
+        registry_guard.publish(unvalidated_topic, message_to_subscriber)
+    };
+
+    log::info!(
+        "Message sent to {} subscribers on topic: {}",
+        sent_count,
+        topic
+    );
+    let message_response = Message::ack(random_id);
+    Ok(message_response)
 }

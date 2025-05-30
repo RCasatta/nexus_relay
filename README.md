@@ -37,9 +37,9 @@ The following message types are possible, specific details for message type in t
 * PUBLISH_PSET (unimplemented)
 * SUBSCRIBE_ANY (unimplemented)
 * SUBSCRIBE
- * PROPOSAL: `buy_asset_id|sell_asset_id`
- * PSET: `wallet_id` (unimplemented)
- * ADDRESS: `address` unconfidential address
+ * PROPOSAL: `<buy_asset_id><sell_asset_id>`
+ * PSET: `<wallet_id>` (unimplemented)
+ * ADDRESS: `<address>` unconfidential address
 * UNSUBSCRIBE (unimplemented)
 * RESULT
 * ACK
@@ -61,7 +61,7 @@ Contain the lenght of the following content. Use a decimal base instead of a mor
 
 ## Message examples:
 
-Publish generic: `PUBLISH||1|25|topic|{"message":"hello"}`
+Publish generic: `PUBLISH_ANY||1|25|topic|{"message":"hello"}`
 
 Publish Proposal: `PUBLISH_PROPOSAL||1|9|$PROPOSAL`
 
@@ -77,16 +77,27 @@ Subscribe: `SUBSCRIBE||1|8|mytopic1`
 
 ## Messages
 
+
+### SUBSCRIBE
+
+The clients can subscribe to a specific topics that have some validation from the relay.
+
+* Liquidex: Use topic `<sell_asset_id>_<buy_asset_id>` (129 characters including the underscore separator) to receive proposal selling/buying the specified asset ids
+* Psets: Use topic `<wallet_id>` as specified in https://github.com/ElementsProject/ELIPs/pull/25 to receive PSETs published relative to the `wallet_id`. Note the server don't and can't guarantee pset received are generated from `wallet_id` and must be validated client side, for example validating that in the PSET there are already signature from other member of the `wallet_id` and verifying PSET outputs.
+* Addresses: use topic `<unconfidential_address>` to be notified when the address is seen as output of a transaction entering the mempool.
+
+
 ### PUBLISH_ANY
 
-To publish a generic string on any given topic like
+To publish a generic string visible from client that used SUBSCRIBE_ANY on any given topic like
 
 ```
-PUBLISH||XYZGBH|25|topic|{"message":"hello"}
+PUBLISH_ANY||XYZGBH|25|topic|{"message":"hello"}
 ```
 
-The publish message content must start with a topic followed by a separator `|`. The generic topic cannot be longer or equal 32 chars.
-Note you can have specific reserved topics, pset/proposals/address that are longer equal or longer than 32 chars.
+The publish message content must start with a topic (only alphanumeric and `_`) followed by a separator `|`.
+
+Note `SUBSCRIBE` use the reserved topics for pset/proposals/address while `SUBSCRIBE_ANY` can receive any topic and message sent by any client with `PUBLISH_ANY`, thus 
 
 ### PUBLISH_PROPOSAL
 
@@ -119,7 +130,8 @@ Where `$PROPOSAL_JSON` has the following format (removed tx hex for brevity):
 }
 ```
 
-The topic of this proposal is automatically inferred by the proposal json and will be `6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7:f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28`
+The topic of this proposal is automatically inferred by the proposal json and will be the first asset id concatenated with the second asset id 
+`6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a_7f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28`
 
 Note that in this case the topic is longer than the 32 chars enforced by the generic publish so that clients subscribing to this topic has reasonable guarantee there have been some validation on the proposal by the server. Validations include:
 
@@ -132,21 +144,13 @@ Note that in this case the topic is longer than the 32 chars enforced by the gen
 The clients can subscribe to a topic which is a just a string.
 No validation is done by the relay and everything published with PUBLISH_ANY with the same topic is forwarded to subscibers
 
-### SUBSCRIBE
-
-The clients can subscribe to a specific topics that have some validation from the relay.
-
-* Liquidex: Use topic `<sell_asset_id>|<buy_asset_id>` (129 characters including separator) to receive proposal selling/buying the specified asset ids
-* Psets: Use topic `<wallet_id>` as specified in https://github.com/ElementsProject/ELIPs/pull/25 to receive PSETs published relative to the `wallet_id`. Note the server don't and can't guarantee pset received are generated from `wallet_id` and must be validated client side, for example validating that in the PSET there are already signature from other member of the `wallet_id` and verifying PSET outputs.
-* Addresses: use topic `<unconfidential_address>` to be notified when the address is seen as output of a transaction entering the mempool.
-
 
 #### Subscibe Liquidex example
 
 For example if I am interested in buying LBTC with USDT in Liquid Mainnet:
 
 ```
-SUBSCRIBE||12345|129|ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2|6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d
+SUBSCRIBE||12345|129|ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2_6f0279e9ed041c3d710a9f57d0c02928416460c4b722ae3457a11eec381c526d
 ```
 
 ### PING
@@ -177,7 +181,7 @@ To test with Liquid asset pairs:
 ```bash
 # Terminal 1: Subscribe to asset pair
 $ websocat ws://127.0.0.1:8080
-SUBSCRIBE|||129|6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7|f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28
+SUBSCRIBE|||129|6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7_f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28
 ```
 
 ```bash
