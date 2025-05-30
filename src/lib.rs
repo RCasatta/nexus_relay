@@ -468,10 +468,7 @@ mod tests {
                 &client_tx2,
             ))
             .unwrap();
-        assert_eq!(
-            message_response.to_string(),
-            format!("RESULT||{id1}|18|proposal published")
-        );
+        assert_eq!(message_response.to_string(), format!("ACK||{id1}||"));
         let message_received = client_rx1.blocking_recv().unwrap();
         let parsed_message = Message::parse(&message_received).unwrap();
 

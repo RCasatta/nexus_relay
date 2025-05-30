@@ -42,7 +42,7 @@ pub async fn process_publish_proposal<'a>(
         sent_count,
         topic
     );
-    let message_response = Message::new(MessageType::Result, random_id, "proposal published");
+    let message_response = Message::ack(random_id);
     Ok(message_response)
 }
 
@@ -97,9 +97,6 @@ mod tests {
                 message_publish.random_id,
             ))
             .unwrap();
-        assert_eq!(
-            message_response.to_string(),
-            format!("RESULT||{id}|18|proposal published")
-        );
+        assert_eq!(message_response.to_string(), format!("ACK||{id}||"));
     }
 }
