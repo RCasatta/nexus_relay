@@ -471,6 +471,7 @@ mod tests {
         assert_eq!(message_response.to_string(), format!("ACK||{id1}||"));
         let message_received = client_rx1.blocking_recv().unwrap();
         let parsed_message = Message::parse(&message_received).unwrap();
+        assert_eq!(parsed_message.type_, MessageType::Result);
 
         // Parse both strings to ensure we compare JSON content, not formatting
         let json1: serde_json::Value = serde_json::from_str(parsed_message.content()).unwrap();
