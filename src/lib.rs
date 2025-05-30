@@ -207,23 +207,10 @@ pub async fn process_message<'a>(
             .await
         }
         MessageType::Subscribe => {
-            let topic = message_request.content().to_string();
-            if topic.is_empty() {
-                return Err(Box::new(Error::MissingTopic));
-            }
-            if topic.len() > 129 {
-                return Err(Box::new(Error::InvalidTopic));
-            }
-
-            // Lock the mutex only when needed and release it immediately
-            {
-                let mut registry_guard = registry.lock().unwrap();
-                let topic = Topic::Validated(topic);
-                registry_guard.subscribe(topic, client_tx_clone.clone());
-            }
-
-            let message_response = Message::ack(message_request.random_id);
-            Ok(message_response)
+            subscribe_to_topic(message_request, registry, client_tx_clone, true)
+        }
+        MessageType::SubscribeAny => {
+            subscribe_to_topic(message_request, registry, client_tx_clone, false)
         }
         MessageType::Result => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
         MessageType::Error => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
@@ -234,9 +221,38 @@ pub async fn process_message<'a>(
         MessageType::Pong => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
         MessageType::PublishPset => Err(Box::new(Error::NotImplemented)),
         MessageType::Publish => Err(Box::new(Error::NotImplemented)),
-        MessageType::SubscribeAny => Err(Box::new(Error::NotImplemented)),
+
         MessageType::Ack => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
     }
+}
+
+fn subscribe_to_topic<'a>(
+    message_request: &'a Message<'a>,
+    registry: Arc<Mutex<TopicRegistry>>,
+    client_tx: &mpsc::UnboundedSender<String>,
+    is_validated: bool,
+) -> Result<Message<'a>, Box<dyn std::error::Error>> {
+    let topic = message_request.content().to_string();
+    if topic.is_empty() {
+        return Err(Box::new(Error::MissingTopic));
+    }
+    if topic.len() > 129 {
+        return Err(Box::new(Error::InvalidTopic));
+    }
+
+    // Lock the mutex only when needed and release it immediately
+    {
+        let mut registry_guard = registry.lock().unwrap();
+        let topic = if is_validated {
+            Topic::Validated(topic)
+        } else {
+            Topic::Unvalidated(topic)
+        };
+        registry_guard.subscribe(topic, client_tx.clone());
+    }
+
+    let message_response = Message::ack(message_request.random_id);
+    Ok(message_response)
 }
 
 pub async fn handle_connection(
