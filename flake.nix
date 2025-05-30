@@ -23,6 +23,7 @@
         
         # Python environment with zmq
         pythonWithZmq = pkgs.python3.withPackages (ps: [ ps.pyzmq ]);
+        lwk_hash = "sha256-WeC/+O+BfLNsrNuSVNV8r5c0VVtKcqK+2vsLrCkeUoY=";
       in
       {
         packages.default = pkgs.rustPlatform.buildRustPackage {
@@ -33,8 +34,8 @@
             lockFile = ./Cargo.lock;
             # TODO remove once released
             outputHashes = {
-              "lwk_wollet-0.9.0" = "sha256-qskba+TrMJAQlm7jE/08BjsuFktZyMLs2tx4jGNLJb0=";
-              "lwk_common-0.9.0" = "sha256-qskba+TrMJAQlm7jE/08BjsuFktZyMLs2tx4jGNLJb0=";
+              "lwk_wollet-0.9.0" = lwk_hash;
+              "lwk_common-0.9.0" = lwk_hash;
               "elements-0.25.2" = "sha256-pUbvYi1LZn73w4owjVjOvBSTeAaL1/44zSsEpT6i4EE=";
 
             };
