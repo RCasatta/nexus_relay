@@ -40,6 +40,7 @@ The following message types are possible, specific details for message type in t
  * PROPOSAL: `<buy_asset_id>_<sell_asset_id>`
  * PSET: `<wallet_id>` (unimplemented)
  * ADDRESS: `<address>` unconfidential address
+ * TXID: `<txid>` when tx is confirmed in a block
 * UNSUBSCRIBE (unimplemented)
 * RESULT
 * ACK

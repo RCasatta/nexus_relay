@@ -15,10 +15,10 @@ pub fn process_zmq_message(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut iter = msg.iter().map(|item| item.as_ref());
     let topic = iter.next().unwrap();
-    let tx = iter.next().unwrap();
+    let data = iter.next().unwrap();
     // TODO check there are no other parts of the message
     if topic == b"rawtx" {
-        let tx = elements::Transaction::consensus_decode(tx)?;
+        let tx = elements::Transaction::consensus_decode(data)?;
         let txid = tx.txid().to_string();
 
         log::debug!("Processing ZMQ message with txid: {}", txid);
@@ -46,8 +46,21 @@ pub fn process_zmq_message(
                 }
             }
         }
+    } else if topic == b"rawblock" {
+        let block = elements::Block::consensus_decode(data)?;
+        log::info!("Processing ZMQ message with block: {}", block.block_hash());
+        let txids = block.txdata.iter().map(|tx| tx.txid().to_string());
+        for txid in txids {
+            if let Ok(mut registry) = registry.lock() {
+                let message = Message::new(MessageType::Result, None, &txid);
+                let topic = Topic::Validated(txid.clone());
+                let sent_count = registry.publish(topic, message);
+                if sent_count > 0 {
+                    log::info!("Sent {} messages to txid: {}", sent_count, txid);
+                }
+            }
+        }
     }
-
     Ok(())
 }
 
@@ -61,7 +74,8 @@ pub async fn start_zmq_listener(
     // Create the subscriber socket correctly
     let socket_builder = subscribe(&ctx);
     let socket_builder = socket_builder.connect(endpoint)?;
-    let mut socket = socket_builder.subscribe(b"rawtx").unwrap();
+    let mut socket = socket_builder.subscribe(b"rawtx")?;
+    socket.subscribe(b"rawblock")?;
 
     log::info!("Async ZMQ subscriber listening on {}", endpoint);
 
