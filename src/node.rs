@@ -296,38 +296,62 @@ mod tests {
             .expect("Failed to send subscribe message");
 
         // Wait for subscription confirmation
-        if let Some(response) = ws_receiver.next().await {
-            let response = response.expect("Failed to receive response");
-            if let TungsteniteMessage::Text(text) = response {
-                println!("Subscribe response: {}", text);
-                // Should receive an ACK message
-                assert!(text.contains("ACK") || text.contains("RESULT"));
-            }
+        if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+            println!("Subscribe response: {}", text);
+            // Should receive an ACK message
+            assert!(text.contains("ACK") || text.contains("RESULT"));
+        } else {
+            assert!(false);
         }
 
         // Now send funds to the target address (this should trigger a rawtx ZMQ notification)
-        let _txid = test_node.send_to_address(&target_address, 1.0).unwrap();
+        let txid = test_node.send_to_address(&target_address, 1.0).unwrap();
         println!("Sent transaction to address: {}", target_address_str);
 
         // Wait for the address notification from ZMQ
-        let mut received_notification = false;
+        if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+            println!("Received message: {}", text);
+            assert!(text.contains("RESULT") && text.contains(&target_address_str));
+        } else {
+            assert!(false);
+        }
 
-        if let Some(msg_result) =
-            tokio::time::timeout(tokio::time::Duration::from_millis(1000), ws_receiver.next())
-                .await
-                .ok()
-                .flatten()
-        {
-            if let Ok(TungsteniteMessage::Text(text)) = msg_result {
-                println!("Received message: {}", text);
+        // Subscribe to the transaction ID
+        let subscribe_txid_message = format!("SUBSCRIBE||54321|{}|{}", txid.len(), txid);
+        println!("Subscribe to txid message: {}", subscribe_txid_message);
 
-                // Check if this is a RESULT message containing our target address
-                if text.contains("RESULT") && text.contains(&target_address_str) {
-                    received_notification = true;
-                } else {
-                    assert!(false, "Received unexpected message: {}", text);
+        ws_sender
+            .send(TungsteniteMessage::Text(subscribe_txid_message))
+            .await
+            .expect("Failed to send txid subscribe message");
+
+        // Wait for subscription confirmation
+        if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+            println!("Txid subscribe response: {}", text);
+            // Should receive an ACK message
+            assert!(text.contains("ACK") || text.contains("RESULT"));
+        } else {
+            assert!(false);
+        }
+
+        // Generate a block to confirm the transaction
+        test_node.generate_to_address(1, &funding_address).unwrap();
+        println!("Generated block to confirm transaction");
+
+        // Wait for the txid confirmation notification from ZMQ
+        let mut received_txid_notification = false;
+
+        for _ in 0..2 {
+            // We are receiving two messages, one for the txid and one for the address which is sending two because zmq rawtx is sent twice
+            if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+                println!("Received txid confirmation message: {}", text);
+
+                // Check if this is a RESULT message containing our txid
+                if text.contains("RESULT") && text.contains(&txid) {
+                    received_txid_notification = true;
                 }
             }
         }
+        assert!(received_txid_notification);
     }
 }
