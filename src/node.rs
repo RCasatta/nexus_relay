@@ -58,6 +58,9 @@ impl Node {
 
 #[cfg(test)]
 mod tests {
+    use crate::{async_main, Config, Network};
+    use futures_util::{SinkExt, StreamExt};
+
     use super::Node;
     use bitcoind::bitcoincore_rpc::RpcApi;
     use bitcoind::{BitcoinD, Conf};
@@ -99,6 +102,39 @@ mod tests {
                 .unwrap();
             Ok(())
         }
+        pub fn send_to_address(
+            &self,
+            address: &Address,
+            amount: f64,
+        ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            let txid: Value = self
+                .elementsd
+                .client
+                .call(
+                    "sendtoaddress",
+                    &[address.to_string().into(), amount.into()],
+                )
+                .unwrap();
+            Ok(txid.as_str().unwrap().to_string())
+        }
+        pub fn get_balance(&self) -> Result<f64, Box<dyn std::error::Error + Send + Sync>> {
+            let balance: Value = self.elementsd.client.call("getbalance", &[]).unwrap();
+            println!("Raw balance response: {:?}", balance);
+
+            // In Elements, balance might be an object with asset information
+            if let Some(balance_num) = balance.as_f64() {
+                Ok(balance_num)
+            } else if let Some(balance_obj) = balance.as_object() {
+                // Try to get the bitcoin/L-BTC balance
+                if let Some(btc_balance) = balance_obj.values().next() {
+                    Ok(btc_balance.as_f64().unwrap_or(0.0))
+                } else {
+                    Ok(0.0)
+                }
+            } else {
+                Ok(0.0)
+            }
+        }
         pub fn get_block_hash(
             &self,
             block_num: u64,
@@ -126,9 +162,19 @@ mod tests {
             let block = elements::Block::consensus_decode(&bytes[..]).unwrap();
             Ok(block)
         }
+        pub fn rescan_blockchain(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.elementsd
+                .client
+                .call::<Value>("rescanblockchain", &[])
+                .unwrap();
+            Ok(())
+        }
     }
 
-    fn launch_elementsd<S: AsRef<OsStr>>(exe: S) -> BitcoinD {
+    fn launch_elementsd<S: AsRef<OsStr>>(exe: S) -> (BitcoinD, u16) {
+        let zmq_port = bitcoind::get_available_port().unwrap();
+        let zmq1 = format!("-zmqpubrawblock=tcp://127.0.0.1:{}", zmq_port);
+        let zmq2 = format!("-zmqpubrawtx=tcp://127.0.0.1:{}", zmq_port);
         let mut conf = Conf::default();
         let args = vec![
             "-fallbackfee=0.0001",
@@ -139,25 +185,31 @@ mod tests {
             "-acceptdiscountct=1",
             "-txindex=1",
             "-rest=1",
+            zmq1.as_str(),
+            zmq2.as_str(),
         ];
         conf.args = args;
         conf.view_stdout = std::env::var("RUST_LOG").is_ok();
         conf.network = "liquidregtest";
 
-        BitcoinD::with_conf(exe, &conf).unwrap()
+        let elementsd = BitcoinD::with_conf(exe, &conf).unwrap();
+        (elementsd, zmq_port)
     }
 
     #[test]
     fn test_launch_elementsd() {
         let elementsd_exe = env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set");
-        let elementsd = launch_elementsd(elementsd_exe);
+        let (elementsd, _) = launch_elementsd(elementsd_exe);
         let node = Node::new(elementsd.rpc_url());
 
         let test_node = TestNode::new(elementsd);
-
         let address = test_node.get_new_address().unwrap();
 
         test_node.generate_to_address(101, &address).unwrap();
+
+        // Check balance and generate more blocks if needed
+        let balance = test_node.get_balance().unwrap();
+        println!("Wallet balance after 101 blocks: {}", balance);
 
         let block_hash = test_node.get_block_hash(101).unwrap();
         let block = test_node.get_block(block_hash).unwrap();
@@ -178,5 +230,104 @@ mod tests {
         let is_spent = rt.block_on(node.is_spent(outpoint)).unwrap();
         assert_eq!(tx.txid(), block.txdata[0].txid());
         assert!(is_spent);
+    }
+
+    #[tokio::test]
+    async fn test_publish_from_zmq() {
+        let elementsd_exe = env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set");
+        let (elementsd, zmq_port) = launch_elementsd(elementsd_exe);
+        let base_url = elementsd.rpc_url().to_string();
+
+        let test_node = TestNode::new(elementsd);
+
+        // Rescan blockchain to recognize initialfreecoins
+        test_node.rescan_blockchain().unwrap();
+
+        let port = bitcoind::get_available_port().unwrap();
+
+        let config = Config {
+            base_url,
+            zmq_endpoint: format!("tcp://127.0.0.1:{}", zmq_port),
+            network: Network::ElementsRegtest,
+            port,
+        };
+
+        tokio::spawn(async move {
+            async_main(config).await.unwrap();
+        });
+
+        // Give the server a moment to start up
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // Generate some initial blocks to get funds
+        let funding_address = test_node.get_new_address().unwrap();
+        test_node
+            .generate_to_address(101, &funding_address)
+            .unwrap();
+
+        // Check balance and generate more blocks if needed
+        let balance = test_node.get_balance().unwrap();
+        assert!(balance > 0.0);
+
+        // Get a new address to subscribe to (different from funding address)
+        let target_address = test_node.get_new_address().unwrap();
+        let target_address_str = target_address.to_unconfidential().to_string();
+
+        // Connect to the WebSocket server
+        let ws_url = format!("ws://127.0.0.1:{}", port);
+        let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
+            .await
+            .expect("Failed to connect to WebSocket");
+
+        let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+
+        // Subscribe to the target address
+        let subscribe_message = format!(
+            "SUBSCRIBE||12345|{}|{}",
+            target_address_str.len(),
+            target_address_str
+        );
+        println!("Subscribe message: {}", subscribe_message);
+
+        use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+        ws_sender
+            .send(TungsteniteMessage::Text(subscribe_message))
+            .await
+            .expect("Failed to send subscribe message");
+
+        // Wait for subscription confirmation
+        if let Some(response) = ws_receiver.next().await {
+            let response = response.expect("Failed to receive response");
+            if let TungsteniteMessage::Text(text) = response {
+                println!("Subscribe response: {}", text);
+                // Should receive an ACK message
+                assert!(text.contains("ACK") || text.contains("RESULT"));
+            }
+        }
+
+        // Now send funds to the target address (this should trigger a rawtx ZMQ notification)
+        let _txid = test_node.send_to_address(&target_address, 1.0).unwrap();
+        println!("Sent transaction to address: {}", target_address_str);
+
+        // Wait for the address notification from ZMQ
+        let mut received_notification = false;
+
+        if let Some(msg_result) =
+            tokio::time::timeout(tokio::time::Duration::from_millis(1000), ws_receiver.next())
+                .await
+                .ok()
+                .flatten()
+        {
+            if let Ok(TungsteniteMessage::Text(text)) = msg_result {
+                println!("Received message: {}", text);
+
+                // Check if this is a RESULT message containing our target address
+                if text.contains("RESULT") && text.contains(&target_address_str) {
+                    received_notification = true;
+                } else {
+                    assert!(false, "Received unexpected message: {}", text);
+                }
+            }
+        }
     }
 }
