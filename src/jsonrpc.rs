@@ -29,6 +29,18 @@ fn parse_subscribe_any(notification: JsonRpc) -> Option<(i64, TopicContent)> {
     Some((id, topic_content))
 }
 
+fn ping(id: i64) -> JsonRpc {
+    JsonRpc::request(id, &MessageType::Ping.to_string())
+}
+
+fn parse_ping(notification: JsonRpc) -> Option<i64> {
+    if notification.get_method() != Some(&MessageType::Ping.to_string()) {
+        return None;
+    }
+    let id = parse_id(notification.get_id()?)?;
+    Some(id)
+}
+
 fn parse_id(id: Id) -> Option<i64> {
     match id {
         Id::Num(n) => Some(n),
@@ -60,5 +72,16 @@ mod tests {
         assert_eq!(id, 10);
         assert_eq!(topic_content.topic, "test");
         assert_eq!(topic_content.content, "content");
+
+        let ping = ping(10);
+        let expected = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "PING"
+        });
+        let result = serde_json::to_value(&ping).unwrap();
+        assert_eq!(result, expected);
+        let id = parse_ping(ping).unwrap();
+        assert_eq!(id, 10);
     }
 }
