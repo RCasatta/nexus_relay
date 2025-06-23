@@ -2,7 +2,7 @@ use lwk_wollet::elements::AssetId;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use crate::message::{proposal_topic, Error, Message, MessageType};
+use crate::message::{proposal_topic, Error, Message, Methods};
 use crate::node::Node;
 use crate::{Topic, TopicRegistry};
 
@@ -28,7 +28,7 @@ pub async fn process_publish_proposal<'a>(
     };
     let topic = proposal_topic(&proposal)?;
     let proposal_str = format!("{}", proposal);
-    let message_to_subscriber = Message::new(MessageType::Result, None, &proposal_str);
+    let message_to_subscriber = Message::new(Methods::Result, None, &proposal_str);
 
     // Lock the mutex only when needed and release it immediately
     let sent_count = {

@@ -6,60 +6,39 @@ use lwk_wollet::{LiquidexProposal, Unvalidated, Validated};
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Message<'a> {
-    pub type_: MessageType,
+    pub type_: Methods,
     pub random_id: Option<u64>,
     pub content: &'a str,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum MessageType {
+pub enum Methods {
     Publish,
-    PublishAny,
-    PublishProposal,
-    PublishPset,
     Subscribe,
-    SubscribeAny,
-    Result,
-    Error,
+    Unsubscribe,
     Ping,
-    Pong,
-    Ack,
 }
 
-impl fmt::Display for MessageType {
+impl fmt::Display for Methods {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MessageType::Publish => write!(f, "PUBLISH"),
-            MessageType::PublishAny => write!(f, "PUBLISH_ANY"),
-            MessageType::PublishProposal => write!(f, "PUBLISH_PROPOSAL"),
-            MessageType::PublishPset => write!(f, "PUBLISH_PSET"),
-            MessageType::Subscribe => write!(f, "SUBSCRIBE"),
-            MessageType::SubscribeAny => write!(f, "SUBSCRIBE_ANY"),
-            MessageType::Result => write!(f, "RESULT"),
-            MessageType::Error => write!(f, "ERROR"),
-            MessageType::Ping => write!(f, "PING"),
-            MessageType::Pong => write!(f, "PONG"),
-            MessageType::Ack => write!(f, "ACK"),
+            Methods::Publish => write!(f, "publish"),
+            Methods::Subscribe => write!(f, "subscribe"),
+            Methods::Unsubscribe => write!(f, "unsubscribe"),
+            Methods::Ping => write!(f, "ping"),
         }
     }
 }
 
-impl FromStr for MessageType {
+impl FromStr for Methods {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "PUBLISH" => Ok(MessageType::Publish),
-            "PUBLISH_PROPOSAL" => Ok(MessageType::PublishProposal),
-            "PUBLISH_PSET" => Ok(MessageType::PublishPset),
-            "PUBLISH_ANY" => Ok(MessageType::PublishAny),
-            "SUBSCRIBE" => Ok(MessageType::Subscribe),
-            "SUBSCRIBE_ANY" => Ok(MessageType::SubscribeAny),
-            "RESULT" => Ok(MessageType::Result),
-            "ERROR" => Ok(MessageType::Error),
-            "PING" => Ok(MessageType::Ping),
-            "PONG" => Ok(MessageType::Pong),
-            "ACK" => Ok(MessageType::Ack),
+            "publish" => Ok(Methods::Publish),
+            "subscribe" => Ok(Methods::Subscribe),
+            "unsubscribe" => Ok(Methods::Unsubscribe),
+            "ping" => Ok(Methods::Ping),
             _ => Err(Error::InvalidMessage),
         }
     }
@@ -130,95 +109,95 @@ impl From<std::num::ParseIntError> for Error {
     }
 }
 
-// Custom parser instead of implementing FromStr directly to avoid lifetime issues
-impl<'a> Message<'a> {
-    pub fn new(type_: MessageType, random_id: Option<u64>, content: &'a str) -> Self {
-        Message {
-            type_,
-            random_id,
-            content,
-        }
-    }
+// // Custom parser instead of implementing FromStr directly to avoid lifetime issues
+// impl<'a> Message<'a> {
+//     pub fn new(type_: Methods, random_id: Option<u64>, content: &'a str) -> Self {
+//         Message {
+//             type_,
+//             random_id,
+//             content,
+//         }
+//     }
 
-    pub fn ack(random_id: Option<u64>) -> Self {
-        Message::new(MessageType::Ack, random_id, "")
-    }
+//     pub fn ack(random_id: Option<u64>) -> Self {
+//         Message::new(Methods::Ack, random_id, "")
+//     }
 
-    pub fn parse(s: &'a str) -> Result<Self, Error> {
-        let mut parts = s.splitn(5, '|');
+//     pub fn parse(s: &'a str) -> Result<Self, Error> {
+//         let mut parts = s.splitn(5, '|');
 
-        let type_str = parts.next().ok_or(Error::MissingField)?;
-        let type_ = type_str.parse::<MessageType>()?;
+//         let type_str = parts.next().ok_or(Error::MissingField)?;
+//         let type_ = type_str.parse::<Methods>()?;
 
-        let version_str = parts.next().ok_or(Error::MissingField)?;
-        if !version_str.is_empty() {
-            return Err(Error::InvalidVersion);
-        }
+//         let version_str = parts.next().ok_or(Error::MissingField)?;
+//         if !version_str.is_empty() {
+//             return Err(Error::InvalidVersion);
+//         }
 
-        let random_id_str = parts.next().ok_or(Error::MissingField)?;
-        let random_id = if random_id_str.is_empty() {
-            None
-        } else {
-            Some(random_id_str.parse::<u64>().map_err(|_| Error::InvalidId)?)
-        };
+//         let random_id_str = parts.next().ok_or(Error::MissingField)?;
+//         let random_id = if random_id_str.is_empty() {
+//             None
+//         } else {
+//             Some(random_id_str.parse::<u64>().map_err(|_| Error::InvalidId)?)
+//         };
 
-        let length_str = parts.next().ok_or(Error::MissingField)?;
-        let length = if length_str.is_empty() {
-            0
-        } else {
-            length_str
-                .parse::<u64>()
-                .map_err(|_| Error::InvalidLength)?
-        };
+//         let length_str = parts.next().ok_or(Error::MissingField)?;
+//         let length = if length_str.is_empty() {
+//             0
+//         } else {
+//             length_str
+//                 .parse::<u64>()
+//                 .map_err(|_| Error::InvalidLength)?
+//         };
 
-        let content = parts.next().ok_or(Error::MissingField)?;
+//         let content = parts.next().ok_or(Error::MissingField)?;
 
-        // Special handling for trailing newlines in content
-        let (actual_content, actual_length) = if content.ends_with('\n') {
-            let trimmed = content.trim_end_matches('\n');
-            (trimmed, trimmed.len() as u64)
-        } else {
-            (content, content.len() as u64)
-        };
+//         // Special handling for trailing newlines in content
+//         let (actual_content, actual_length) = if content.ends_with('\n') {
+//             let trimmed = content.trim_end_matches('\n');
+//             (trimmed, trimmed.len() as u64)
+//         } else {
+//             (content, content.len() as u64)
+//         };
 
-        if actual_length != length {
-            return Err(Error::ContentLengthMismatch {
-                expected: length,
-                actual: actual_length,
-            });
-        }
+//         if actual_length != length {
+//             return Err(Error::ContentLengthMismatch {
+//                 expected: length,
+//                 actual: actual_length,
+//             });
+//         }
 
-        Ok(Message {
-            type_,
-            random_id,
-            content: actual_content,
-        })
-    }
+//         Ok(Message {
+//             type_,
+//             random_id,
+//             content: actual_content,
+//         })
+//     }
 
-    pub fn content(&self) -> &str {
-        self.content
-    }
+//     pub fn content(&self) -> &str {
+//         self.content
+//     }
 
-    pub fn topic_content(&self) -> Result<(&str, &str), Error> {
-        let mut parts = self.content.splitn(2, '|');
-        let topic = parts.next().ok_or(Error::MissingTopic)?;
-        if topic.is_empty() {
-            return Err(Error::MissingTopic);
-        }
-        let content = parts.next().ok_or(Error::MissingContent)?;
+//     pub fn topic_content(&self) -> Result<(&str, &str), Error> {
+//         let mut parts = self.content.splitn(2, '|');
+//         let topic = parts.next().ok_or(Error::MissingTopic)?;
+//         if topic.is_empty() {
+//             return Err(Error::MissingTopic);
+//         }
+//         let content = parts.next().ok_or(Error::MissingContent)?;
 
-        Ok((topic, content))
-    }
+//         Ok((topic, content))
+//     }
 
-    pub fn proposal(&self) -> Result<LiquidexProposal<Unvalidated>, Error> {
-        LiquidexProposal::from_str(self.content).map_err(|_| Error::InvalidProposal)
-    }
-}
+//     pub fn proposal(&self) -> Result<LiquidexProposal<Unvalidated>, Error> {
+//         LiquidexProposal::from_str(self.content).map_err(|_| Error::InvalidProposal)
+//     }
+// }
 
-pub fn proposal_topic(proposal: &LiquidexProposal<Validated>) -> Result<String, Error> {
-    let topic = format!("{}_{}", proposal.input().asset, proposal.output().asset);
-    Ok(topic)
-}
+// pub fn proposal_topic(proposal: &LiquidexProposal<Validated>) -> Result<String, Error> {
+//     let topic = format!("{}_{}", proposal.input().asset, proposal.output().asset);
+//     Ok(topic)
+// }
 
 #[cfg(test)]
 mod tests {
@@ -232,189 +211,182 @@ mod tests {
     fn test_message_type_roundtrip() {
         // Test all variants of MessageType for roundtrip conversion
         let types = vec![
-            MessageType::Publish,
-            MessageType::PublishAny,
-            MessageType::PublishProposal,
-            MessageType::PublishPset,
-            MessageType::Subscribe,
-            MessageType::SubscribeAny,
-            MessageType::Result,
-            MessageType::Error,
-            MessageType::Ping,
-            MessageType::Pong,
-            MessageType::Ack,
+            Methods::Publish,
+            Methods::Subscribe,
+            Methods::Unsubscribe,
+            Methods::Ping,
         ];
 
         for msg_type in types {
             // Convert MessageType to string
             let type_str = msg_type.to_string();
             // Parse string back to MessageType
-            let parsed_type = MessageType::from_str(&type_str).unwrap();
+            let parsed_type = Methods::from_str(&type_str).unwrap();
             // Verify roundtrip conversion
             assert_eq!(msg_type, parsed_type);
         }
     }
 
-    #[test]
-    fn test_from_str() {
-        let message = Message::parse("PUBLISH||12345|25|topic|{\"message\":\"hello\"}").unwrap();
-        assert_eq!(message.type_, MessageType::Publish);
-        assert_eq!(message.random_id, Some(12345));
-        assert_eq!(message.content, "topic|{\"message\":\"hello\"}");
+    // #[test]
+    // fn test_from_str() {
+    //     let message = Message::parse("PUBLISH||12345|25|topic|{\"message\":\"hello\"}").unwrap();
+    //     assert_eq!(message.type_, Methods::Publish);
+    //     assert_eq!(message.random_id, Some(12345));
+    //     assert_eq!(message.content, "topic|{\"message\":\"hello\"}");
 
-        // Generic publish
-        let message = Message::parse("PUBLISH||1|25|topic|{\"message\":\"hello\"}").unwrap();
-        assert_eq!(message.type_, MessageType::Publish);
-        assert_eq!(message.random_id, Some(1));
-        assert_eq!(message.content, "topic|{\"message\":\"hello\"}");
+    //     // Generic publish
+    //     let message = Message::parse("PUBLISH||1|25|topic|{\"message\":\"hello\"}").unwrap();
+    //     assert_eq!(message.type_, Methods::Publish);
+    //     assert_eq!(message.random_id, Some(1));
+    //     assert_eq!(message.content, "topic|{\"message\":\"hello\"}");
 
-        // Publish proposal (with placeholder content)
-        let message = Message::parse("PUBLISH_PROPOSAL||1|9|$PROPOSAL").unwrap();
-        assert_eq!(message.type_, MessageType::PublishProposal);
-        assert_eq!(message.random_id, Some(1));
-        assert_eq!(message.content, "$PROPOSAL");
+    //     // Publish proposal (with placeholder content)
+    //     let message = Message::parse("PUBLISH_PROPOSAL||1|9|$PROPOSAL").unwrap();
+    //     assert_eq!(message.type_, Methods::PublishProposal);
+    //     assert_eq!(message.random_id, Some(1));
+    //     assert_eq!(message.content, "$PROPOSAL");
 
-        // Response - RESULT
-        let message = Message::parse("RESULT||1|22|{\"response\":\"success\"}").unwrap();
-        assert_eq!(message.type_, MessageType::Result);
-        assert_eq!(message.random_id, Some(1));
-        assert_eq!(message.content, "{\"response\":\"success\"}");
+    //     // Response - RESULT
+    //     let message = Message::parse("RESULT||1|22|{\"response\":\"success\"}").unwrap();
+    //     assert_eq!(message.type_, Methods::Result);
+    //     assert_eq!(message.random_id, Some(1));
+    //     assert_eq!(message.content, "{\"response\":\"success\"}");
 
-        // Response - ACK
-        let message = Message::parse("RESULT|||0|").unwrap();
-        assert_eq!(message.type_, MessageType::Result);
-        assert_eq!(message.random_id, None);
-        assert_eq!(message.content, "");
+    //     // Response - ACK
+    //     let message = Message::parse("RESULT|||0|").unwrap();
+    //     assert_eq!(message.type_, Methods::Result);
+    //     assert_eq!(message.random_id, None);
+    //     assert_eq!(message.content, "");
 
-        // Ping
-        let message = Message::parse("PING|||0|").unwrap();
-        assert_eq!(message.type_, MessageType::Ping);
-        assert_eq!(message.random_id, None);
-        assert_eq!(message.content, "");
+    //     // Ping
+    //     let message = Message::parse("PING|||0|").unwrap();
+    //     assert_eq!(message.type_, Methods::Ping);
+    //     assert_eq!(message.random_id, None);
+    //     assert_eq!(message.content, "");
 
-        let message = Message::parse("PING||||").unwrap();
-        assert_eq!(message.type_, MessageType::Ping);
-        assert_eq!(message.random_id, None);
-        assert_eq!(message.content, "");
+    //     let message = Message::parse("PING||||").unwrap();
+    //     assert_eq!(message.type_, Methods::Ping);
+    //     assert_eq!(message.random_id, None);
+    //     assert_eq!(message.content, "");
 
-        // Pong
-        let message = Message::parse("PONG|||0|").unwrap();
-        assert_eq!(message.type_, MessageType::Pong);
-        assert_eq!(message.random_id, None);
-        assert_eq!(message.content, "");
+    //     // Pong
+    //     let message = Message::parse("PONG|||0|").unwrap();
+    //     assert_eq!(message.type_, Methods::Pong);
+    //     assert_eq!(message.random_id, None);
+    //     assert_eq!(message.content, "");
 
-        // Error
-        let message = Message::parse("ERROR||1|12|InvalidTopic").unwrap();
-        assert_eq!(message.type_, MessageType::Error);
-        assert_eq!(message.random_id, Some(1));
-        assert_eq!(message.content, "InvalidTopic");
+    //     // Error
+    //     let message = Message::parse("ERROR||1|12|InvalidTopic").unwrap();
+    //     assert_eq!(message.type_, Methods::Error);
+    //     assert_eq!(message.random_id, Some(1));
+    //     assert_eq!(message.content, "InvalidTopic");
 
-        // Subscribe
-        let message = Message::parse("SUBSCRIBE||1|8|mytopic1").unwrap();
-        assert_eq!(message.type_, MessageType::Subscribe);
-        assert_eq!(message.random_id, Some(1));
-        assert_eq!(message.content, "mytopic1");
-    }
+    //     // Subscribe
+    //     let message = Message::parse("SUBSCRIBE||1|8|mytopic1").unwrap();
+    //     assert_eq!(message.type_, Methods::Subscribe);
+    //     assert_eq!(message.random_id, Some(1));
+    //     assert_eq!(message.content, "mytopic1");
+    // }
 
-    #[test]
-    fn test_error_invalid_message_type() {
-        let result = Message::parse("UNKNOWN||12345|0|");
-        assert!(matches!(result, Err(Error::InvalidMessage)));
-    }
+    // #[test]
+    // fn test_error_invalid_message_type() {
+    //     let result = Message::parse("UNKNOWN||12345|0|");
+    //     assert!(matches!(result, Err(Error::InvalidMessage)));
+    // }
 
-    #[test]
-    fn test_error_missing_field() {
-        let result = Message::parse("PUBLISH||12345");
-        assert_eq!(result, Err(Error::MissingField));
-    }
+    // #[test]
+    // fn test_error_missing_field() {
+    //     let result = Message::parse("PUBLISH||12345");
+    //     assert_eq!(result, Err(Error::MissingField));
+    // }
 
-    #[test]
-    fn test_error_invalid_version() {
-        let result = Message::parse("PUBLISH|invalid|12345|0|");
-        assert!(matches!(result, Err(Error::InvalidVersion)));
-        let result = Message::parse("PUBLISH|1|12345|0|");
-        assert!(matches!(result, Err(Error::InvalidVersion)));
-    }
+    // #[test]
+    // fn test_error_invalid_version() {
+    //     let result = Message::parse("PUBLISH|invalid|12345|0|");
+    //     assert!(matches!(result, Err(Error::InvalidVersion)));
+    //     let result = Message::parse("PUBLISH|1|12345|0|");
+    //     assert!(matches!(result, Err(Error::InvalidVersion)));
+    // }
 
-    #[test]
-    fn test_error_invalid_random_id() {
-        let result = Message::parse("PUBLISH||invalid|0|");
-        assert!(matches!(result, Err(Error::InvalidId)));
-    }
+    // #[test]
+    // fn test_error_invalid_random_id() {
+    //     let result = Message::parse("PUBLISH||invalid|0|");
+    //     assert!(matches!(result, Err(Error::InvalidId)));
+    // }
 
-    #[test]
-    fn test_error_invalid_length() {
-        let result = Message::parse("PUBLISH||12345|invalid|");
-        assert!(matches!(result, Err(Error::InvalidLength)));
-    }
+    // #[test]
+    // fn test_error_invalid_length() {
+    //     let result = Message::parse("PUBLISH||12345|invalid|");
+    //     assert!(matches!(result, Err(Error::InvalidLength)));
+    // }
 
-    #[test]
-    fn test_error_content_length_mismatch() {
-        // Test with content shorter than expected length
-        let result = Message::parse("PUBLISH||12345|10|content");
-        assert!(
-            matches!(result, Err(Error::ContentLengthMismatch { expected, actual })
-            if expected == 10 && actual == 7)
-        );
+    // #[test]
+    // fn test_error_content_length_mismatch() {
+    //     // Test with content shorter than expected length
+    //     let result = Message::parse("PUBLISH||12345|10|content");
+    //     assert!(
+    //         matches!(result, Err(Error::ContentLengthMismatch { expected, actual })
+    //         if expected == 10 && actual == 7)
+    //     );
 
-        // Test with content longer than expected length (not due to trailing newlines)
-        let result = Message::parse("PUBLISH||12345|7|content-too-long");
-        assert!(
-            matches!(result, Err(Error::ContentLengthMismatch { expected, actual })
-            if expected == 7 && actual == 16)
-        );
+    //     // Test with content longer than expected length (not due to trailing newlines)
+    //     let result = Message::parse("PUBLISH||12345|7|content-too-long");
+    //     assert!(
+    //         matches!(result, Err(Error::ContentLengthMismatch { expected, actual })
+    //         if expected == 7 && actual == 16)
+    //     );
 
-        // Test that trailing newlines are properly handled
-        let result = Message::parse("PUBLISH||12345|7|content\n");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().content, "content");
-    }
+    //     // Test that trailing newlines are properly handled
+    //     let result = Message::parse("PUBLISH||12345|7|content\n");
+    //     assert!(result.is_ok());
+    //     assert_eq!(result.unwrap().content, "content");
+    // }
 
-    #[test]
-    fn test_topic_content() {
-        // Test valid topic and content
-        let message = Message::parse("PUBLISH||12345|25|topic|{\"message\":\"hello\"}").unwrap();
-        let (topic, content) = message.topic_content().unwrap();
-        assert_eq!(topic, "topic");
-        assert_eq!(content, "{\"message\":\"hello\"}");
+    // #[test]
+    // fn test_topic_content() {
+    //     // Test valid topic and content
+    //     let message = Message::parse("PUBLISH||12345|25|topic|{\"message\":\"hello\"}").unwrap();
+    //     let (topic, content) = message.topic_content().unwrap();
+    //     assert_eq!(topic, "topic");
+    //     assert_eq!(content, "{\"message\":\"hello\"}");
 
-        // Test with empty content
-        let message = Message::parse("PUBLISH||12345|6|topic|").unwrap();
-        let (topic, content) = message.topic_content().unwrap();
-        assert_eq!(topic, "topic");
-        assert_eq!(content, "");
+    //     // Test with empty content
+    //     let message = Message::parse("PUBLISH||12345|6|topic|").unwrap();
+    //     let (topic, content) = message.topic_content().unwrap();
+    //     assert_eq!(topic, "topic");
+    //     assert_eq!(content, "");
 
-        // Test with missing content
-        let message = Message::parse("PUBLISH||12345|5|topic").unwrap();
-        assert_eq!(message.topic_content(), Err(Error::MissingContent));
+    //     // Test with missing content
+    //     let message = Message::parse("PUBLISH||12345|5|topic").unwrap();
+    //     assert_eq!(message.topic_content(), Err(Error::MissingContent));
 
-        // Test with missing topic
-        let message = Message::parse("PUBLISH||12345|0|").unwrap();
-        assert_eq!(message.topic_content(), Err(Error::MissingTopic));
-    }
+    //     // Test with missing topic
+    //     let message = Message::parse("PUBLISH||12345|0|").unwrap();
+    //     assert_eq!(message.topic_content(), Err(Error::MissingTopic));
+    // }
 
-    #[test]
-    fn test_proposal() {
-        // Test valid proposal
-        let proposal_json = proposal_str();
-        let message = format!("PUBLISH||12345|{}|{}", proposal_json.len(), proposal_json);
-        let message = Message::parse(&message).unwrap();
-        let proposal = message.proposal().unwrap();
-        assert!(matches!(proposal, LiquidexProposal::<Unvalidated> { .. }));
+    // #[test]
+    // fn test_proposal() {
+    //     // Test valid proposal
+    //     let proposal_json = proposal_str();
+    //     let message = format!("PUBLISH||12345|{}|{}", proposal_json.len(), proposal_json);
+    //     let message = Message::parse(&message).unwrap();
+    //     let proposal = message.proposal().unwrap();
+    //     assert!(matches!(proposal, LiquidexProposal::<Unvalidated> { .. }));
 
-        // Test invalid proposal
-        let message = Message::parse("PUBLISH||12345|12|invalid_json").unwrap();
-        assert_eq!(message.proposal(), Err(Error::InvalidProposal));
-    }
+    //     // Test invalid proposal
+    //     let message = Message::parse("PUBLISH||12345|12|invalid_json").unwrap();
+    //     assert_eq!(message.proposal(), Err(Error::InvalidProposal));
+    // }
 
-    #[test]
-    fn test_proposal_topic() {
-        let proposal_json = proposal_str();
-        let message = format!("PUBLISH||12345|{}|{}", proposal_json.len(), proposal_json);
-        let message = Message::parse(&message).unwrap();
-        let proposal = message.proposal().unwrap();
-        let validated = proposal.insecure_validate().unwrap();
-        let topic = proposal_topic(&validated).unwrap();
-        assert_eq!(topic, "6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7_f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28");
-    }
+    // #[test]
+    // fn test_proposal_topic() {
+    //     let proposal_json = proposal_str();
+    //     let message = format!("PUBLISH||12345|{}|{}", proposal_json.len(), proposal_json);
+    //     let message = Message::parse(&message).unwrap();
+    //     let proposal = message.proposal().unwrap();
+    //     let validated = proposal.insecure_validate().unwrap();
+    //     let topic = proposal_topic(&validated).unwrap();
+    //     assert_eq!(topic, "6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7_f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28");
+    // }
 }

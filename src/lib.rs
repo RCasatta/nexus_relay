@@ -3,8 +3,9 @@ use elements::bitcoin::NetworkKind;
 use elements::AddressParams;
 use futures_util::{SinkExt, StreamExt};
 use jsonrpc_lite::JsonRpc;
-use message::{Error, Message, MessageType};
+use message::{Error, Message, Methods};
 use node::Node;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -12,13 +13,13 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as TokioMessage;
 
-use crate::jsonrpc::parse_id;
+use crate::jsonrpc::{parse_id, parse_method};
 
 pub mod jsonrpc;
 pub mod message;
 pub mod node;
-pub mod proposal;
-pub mod zmq;
+// pub mod proposal;
+// pub mod zmq;
 
 /// Configuration for Nexus Relay
 #[derive(Parser, Debug)]
@@ -148,13 +149,13 @@ pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>
     let registry_clone = topic_registry.clone();
     let zmq_endpoint_clone = config.zmq_endpoint.clone();
     let network_clone = config.network;
-    tokio::spawn(async move {
-        if let Err(e) =
-            zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone, network_clone).await
-        {
-            log::error!("Error in ZMQ listener: {}", e);
-        }
-    });
+    // tokio::spawn(async move {
+    //     if let Err(e) =
+    //         zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone, network_clone).await
+    //     {
+    //         log::error!("Error in ZMQ listener: {}", e);
+    //     }
+    // });
 
     while let Ok((stream, addr)) = listener.accept().await {
         let registry = topic_registry.clone();
@@ -176,17 +177,14 @@ pub async fn process_message(
     client: Option<&Node>,
     client_tx_clone: &mpsc::UnboundedSender<String>,
 ) -> Result<JsonRpc, Box<dyn std::error::Error>> {
-    let method = message_request.get_method();
+    let method = parse_method(&message_request).ok_or(Error::NotImplemented)?;
     match method {
-        Some(method) => match method {
-            "PING" => {
-                let id = parse_id(message_request.get_id().unwrap()).unwrap();
-                let response = jsonrpc::pong(id);
-                Ok(response)
-            }
-            _ => Err(Box::new(Error::NotImplemented)),
-        },
-        None => Err(Box::new(Error::NotImplemented)),
+        Methods::Ping => {
+            let id = parse_id(message_request.get_id().unwrap()).unwrap();
+            let response = JsonRpc::success(id, &Value::String("pong".to_string()));
+            Ok(response)
+        }
+        _ => Err(Box::new(Error::NotImplemented)),
     }
     //     MessageType::PublishAny => {
     //         process_publish_any(message_request, registry, message_request.random_id)
@@ -220,34 +218,34 @@ pub async fn process_message(
     // }
 }
 
-fn subscribe_to_topic<'a>(
-    message_request: &'a Message<'a>,
-    registry: Arc<Mutex<TopicRegistry>>,
-    client_tx: &mpsc::UnboundedSender<String>,
-    is_validated: bool,
-) -> Result<Message<'a>, Box<dyn std::error::Error>> {
-    let topic = message_request.content().to_string();
-    if topic.is_empty() {
-        return Err(Box::new(Error::MissingTopic));
-    }
-    if topic.len() > 129 {
-        return Err(Box::new(Error::InvalidTopic));
-    }
+// fn subscribe_to_topic<'a>(
+//     message_request: &'a Message<'a>,
+//     registry: Arc<Mutex<TopicRegistry>>,
+//     client_tx: &mpsc::UnboundedSender<String>,
+//     is_validated: bool,
+// ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
+//     let topic = message_request.content().to_string();
+//     if topic.is_empty() {
+//         return Err(Box::new(Error::MissingTopic));
+//     }
+//     if topic.len() > 129 {
+//         return Err(Box::new(Error::InvalidTopic));
+//     }
 
-    // Lock the mutex only when needed and release it immediately
-    {
-        let mut registry_guard = registry.lock().unwrap();
-        let topic = if is_validated {
-            Topic::Validated(topic)
-        } else {
-            Topic::Unvalidated(topic)
-        };
-        registry_guard.subscribe(topic, client_tx.clone());
-    }
+//     // Lock the mutex only when needed and release it immediately
+//     {
+//         let mut registry_guard = registry.lock().unwrap();
+//         let topic = if is_validated {
+//             Topic::Validated(topic)
+//         } else {
+//             Topic::Unvalidated(topic)
+//         };
+//         registry_guard.subscribe(topic, client_tx.clone());
+//     }
 
-    let message_response = Message::ack(message_request.random_id);
-    Ok(message_response)
-}
+//     let message_response = Message::ack(message_request.random_id);
+//     Ok(message_response)
+// }
 
 pub async fn handle_connection(
     stream: TcpStream,
@@ -345,7 +343,7 @@ pub async fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{proposal_topic, Message, MessageType};
+    use crate::message::{Message, Methods};
     use tokio::runtime::Runtime;
 
     fn proposal_str() -> &'static str {
@@ -545,48 +543,48 @@ mod tests {
     // }
 }
 
-/// Process a publish any message
-fn process_publish_any<'a>(
-    message_request: &'a Message<'a>,
-    registry: Arc<Mutex<TopicRegistry>>,
-    random_id: Option<u64>,
-) -> Result<Message<'a>, Box<dyn std::error::Error>> {
-    let (topic, content) = message_request.topic_content()?;
+// Process a publish any message
+// fn process_publish_any<'a>(
+//     message_request: &'a Message<'a>,
+//     registry: Arc<Mutex<TopicRegistry>>,
+//     random_id: Option<u64>,
+// ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
+//     let (topic, content) = message_request.topic_content()?;
 
-    // Log the raw topic and content to help debug
-    log::debug!("PublishAny raw topic: '{}', content: '{}'", topic, content);
+//     // Log the raw topic and content to help debug
+//     log::debug!("PublishAny raw topic: '{}', content: '{}'", topic, content);
 
-    let message_to_subscriber = Message::new(MessageType::Result, None, content);
+//     let message_to_subscriber = Message::new(Methods::Result, None, content);
 
-    // Lock the mutex only when needed and release it immediately
-    let sent_count = {
-        let mut registry_guard = registry.lock().unwrap();
-        let unvalidated_topic = Topic::Unvalidated(topic.to_string());
+//     // Lock the mutex only when needed and release it immediately
+//     let sent_count = {
+//         let mut registry_guard = registry.lock().unwrap();
+//         let unvalidated_topic = Topic::Unvalidated(topic.to_string());
 
-        // Log the registered topics for comparison
-        for (existing_topic, subscribers) in &registry_guard.topics {
-            match existing_topic {
-                Topic::Unvalidated(t) => log::debug!(
-                    "Found registered Unvalidated topic: '{}' with {} subscribers",
-                    t,
-                    subscribers.len()
-                ),
-                Topic::Validated(t) => log::debug!(
-                    "Found registered Validated topic: '{}' with {} subscribers",
-                    t,
-                    subscribers.len()
-                ),
-            }
-        }
+//         // Log the registered topics for comparison
+//         for (existing_topic, subscribers) in &registry_guard.topics {
+//             match existing_topic {
+//                 Topic::Unvalidated(t) => log::debug!(
+//                     "Found registered Unvalidated topic: '{}' with {} subscribers",
+//                     t,
+//                     subscribers.len()
+//                 ),
+//                 Topic::Validated(t) => log::debug!(
+//                     "Found registered Validated topic: '{}' with {} subscribers",
+//                     t,
+//                     subscribers.len()
+//                 ),
+//             }
+//         }
 
-        registry_guard.publish(unvalidated_topic, message_to_subscriber)
-    };
+//         registry_guard.publish(unvalidated_topic, message_to_subscriber)
+//     };
 
-    log::info!(
-        "Message sent to {} subscribers on topic: {}",
-        sent_count,
-        topic
-    );
-    let message_response = Message::ack(random_id);
-    Ok(message_response)
-}
+//     log::info!(
+//         "Message sent to {} subscribers on topic: {}",
+//         sent_count,
+//         topic
+//     );
+//     let message_response = Message::ack(random_id);
+//     Ok(message_response)
+// }
