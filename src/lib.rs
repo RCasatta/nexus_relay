@@ -174,37 +174,38 @@ pub async fn process_message<'a>(
     client: Option<&Node>,
     client_tx_clone: &mpsc::UnboundedSender<String>,
 ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
-    match message_request.type_ {
-        MessageType::PublishAny => {
-            process_publish_any(message_request, registry, message_request.random_id)
-        }
-        MessageType::PublishProposal => {
-            proposal::process_publish_proposal(
-                message_request,
-                registry,
-                client,
-                message_request.random_id,
-            )
-            .await
-        }
-        MessageType::Subscribe => {
-            subscribe_to_topic(message_request, registry, client_tx_clone, true)
-        }
-        MessageType::SubscribeAny => {
-            subscribe_to_topic(message_request, registry, client_tx_clone, false)
-        }
-        MessageType::Result => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
-        MessageType::Error => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
-        MessageType::Ping => {
-            let message_response = Message::new(MessageType::Pong, message_request.random_id, "");
-            Ok(message_response)
-        }
-        MessageType::Pong => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
-        MessageType::PublishPset => Err(Box::new(Error::NotImplemented)),
-        MessageType::Publish => Err(Box::new(Error::NotImplemented)),
+    return Err(Box::new(Error::NotImplemented));
+    // match message_request.type_ {
+    //     MessageType::PublishAny => {
+    //         process_publish_any(message_request, registry, message_request.random_id)
+    //     }
+    //     MessageType::PublishProposal => {
+    //         proposal::process_publish_proposal(
+    //             message_request,
+    //             registry,
+    //             client,
+    //             message_request.random_id,
+    //         )
+    //         .await
+    //     }
+    //     MessageType::Subscribe => {
+    //         subscribe_to_topic(message_request, registry, client_tx_clone, true)
+    //     }
+    //     MessageType::SubscribeAny => {
+    //         subscribe_to_topic(message_request, registry, client_tx_clone, false)
+    //     }
+    //     MessageType::Result => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
+    //     MessageType::Error => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
+    //     MessageType::Ping => {
+    //         let message_response = Message::new(MessageType::Pong, message_request.random_id, "");
+    //         Ok(message_response)
+    //     }
+    //     MessageType::Pong => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
+    //     MessageType::PublishPset => Err(Box::new(Error::NotImplemented)),
+    //     MessageType::Publish => Err(Box::new(Error::NotImplemented)),
 
-        MessageType::Ack => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
-    }
+    //     MessageType::Ack => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
+    // }
 }
 
 fn subscribe_to_topic<'a>(
