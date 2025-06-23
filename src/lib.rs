@@ -168,12 +168,12 @@ pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>
 }
 
 // Process a message and return the response to send back to the client
-pub async fn process_message<'a>(
-    message_request: &'a Message<'a>,
+pub async fn process_message(
+    message_request: JsonRpc,
     registry: Arc<Mutex<TopicRegistry>>,
     client: Option<&Node>,
     client_tx_clone: &mpsc::UnboundedSender<String>,
-) -> Result<Message<'a>, Box<dyn std::error::Error>> {
+) -> Result<JsonRpc, Box<dyn std::error::Error>> {
     return Err(Box::new(Error::NotImplemented));
     // match message_request.type_ {
     //     MessageType::PublishAny => {
@@ -280,7 +280,7 @@ pub async fn handle_connection(
         };
 
         if let TokioMessage::Text(text) = msg {
-            let raw_message = match Message::parse(&text) {
+            let raw_message = match JsonRpc::parse(&text) {
                 Ok(msg) => msg,
                 Err(_) => {
                     let rpc_error = jsonrpc_lite::Error::new(jsonrpc_lite::ErrorCode::ParseError);
@@ -295,18 +295,20 @@ pub async fn handle_connection(
 
             // Process the message and get response
             let response = match process_message(
-                &raw_message,
+                raw_message,
                 registry_clone.clone(),
                 Some(&client_clone),
                 &client_tx_clone,
             )
             .await
             {
-                Ok(response) => response.to_string(),
+                Ok(response) => serde_json::to_string(&response).unwrap(),
                 Err(e) => {
-                    let error_string = e.to_string();
-                    Message::new(MessageType::Error, raw_message.random_id, &error_string)
-                        .to_string()
+                    let rpc_error =
+                        jsonrpc_lite::Error::new(jsonrpc_lite::ErrorCode::InternalError);
+                    let err = JsonRpc::error(0, rpc_error);
+                    let err_str = serde_json::to_string(&err).unwrap();
+                    err_str
                 }
             };
 
