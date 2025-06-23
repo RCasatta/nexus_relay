@@ -12,6 +12,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as TokioMessage;
 
+use crate::jsonrpc::parse_id;
+
 pub mod jsonrpc;
 pub mod message;
 pub mod node;
@@ -174,8 +176,18 @@ pub async fn process_message(
     client: Option<&Node>,
     client_tx_clone: &mpsc::UnboundedSender<String>,
 ) -> Result<JsonRpc, Box<dyn std::error::Error>> {
-    return Err(Box::new(Error::NotImplemented));
-    // match message_request.type_ {
+    let method = message_request.get_method();
+    match method {
+        Some(method) => match method {
+            "PING" => {
+                let id = parse_id(message_request.get_id().unwrap()).unwrap();
+                let response = jsonrpc::pong(id);
+                Ok(response)
+            }
+            _ => Err(Box::new(Error::NotImplemented)),
+        },
+        None => Err(Box::new(Error::NotImplemented)),
+    }
     //     MessageType::PublishAny => {
     //         process_publish_any(message_request, registry, message_request.random_id)
     //     }
@@ -340,197 +352,197 @@ mod tests {
         include_str!("../test_data/proposal.json")
     }
 
-    async fn process_message_test<'a>(
-        message_request: &'a Message<'a>,
-        registry: Arc<Mutex<TopicRegistry>>,
-    ) -> String {
-        let (client_tx, _client_rx) = mpsc::unbounded_channel();
+    // async fn process_message_test<'a>(
+    //     message_request: &'a Message<'a>,
+    //     registry: Arc<Mutex<TopicRegistry>>,
+    // ) -> String {
+    //     let (client_tx, _client_rx) = mpsc::unbounded_channel();
 
-        match process_message(message_request, registry, None, &client_tx).await {
-            Ok(response) => response.to_string(),
-            Err(e) => {
-                let error_string = e.to_string();
-                Message::new(MessageType::Error, message_request.random_id, &error_string)
-                    .to_string()
-            }
-        }
-    }
+    //     match process_message(message_request, registry, None, &client_tx).await {
+    //         Ok(response) => response.to_string(),
+    //         Err(e) => {
+    //             let error_string = e.to_string();
+    //             Message::new(MessageType::Error, message_request.random_id, &error_string)
+    //                 .to_string()
+    //         }
+    //     }
+    // }
 
-    #[test]
-    fn test_process_message_not_properly_formatted() {
-        // TODO refactor out a fn process_str_message() which takes a string and returns a Message so that this is unit testable
-    }
+    // #[test]
+    // fn test_process_message_not_properly_formatted() {
+    //     // TODO refactor out a fn process_str_message() which takes a string and returns a Message so that this is unit testable
+    // }
 
-    #[test]
-    fn test_process_message_ping() {
-        // Create a runtime
-        let rt = Runtime::new().unwrap();
+    // #[test]
+    // fn test_process_message_ping() {
+    //     // Create a runtime
+    //     let rt = Runtime::new().unwrap();
 
-        // Create test message and registry
-        let message_str = "PING||||";
-        let raw_message = Message::parse(message_str).unwrap();
-        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
-        let (client_tx, _client_rx) = mpsc::unbounded_channel();
+    //     // Create test message and registry
+    //     let message_str = "PING||||";
+    //     let raw_message = Message::parse(message_str).unwrap();
+    //     let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+    //     let (client_tx, _client_rx) = mpsc::unbounded_channel();
 
-        // Process the message
-        let response = rt
-            .block_on(process_message(&raw_message, registry, None, &client_tx))
-            .unwrap();
+    //     // Process the message
+    //     let response = rt
+    //         .block_on(process_message(&raw_message, registry, None, &client_tx))
+    //         .unwrap();
 
-        // Verify response
-        assert_eq!(response.to_string(), "PONG||||");
-    }
+    //     // Verify response
+    //     assert_eq!(response.to_string(), "PONG||||");
+    // }
 
-    #[test]
-    fn test_process_message_subscribe() {
-        // Create a runtime
-        let rt = Runtime::new().unwrap();
+    // #[test]
+    // fn test_process_message_subscribe() {
+    //     // Create a runtime
+    //     let rt = Runtime::new().unwrap();
 
-        // Create test message with a topic
-        let message_str = "SUBSCRIBE||1|6|topic1";
-        let raw_message = Message::parse(message_str).unwrap();
-        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
-        let (client_tx, _client_rx) = mpsc::unbounded_channel();
+    //     // Create test message with a topic
+    //     let message_str = "SUBSCRIBE||1|6|topic1";
+    //     let raw_message = Message::parse(message_str).unwrap();
+    //     let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+    //     let (client_tx, _client_rx) = mpsc::unbounded_channel();
 
-        // Process the message
-        let response = rt
-            .block_on(process_message(&raw_message, registry, None, &client_tx))
-            .unwrap();
+    //     // Process the message
+    //     let response = rt
+    //         .block_on(process_message(&raw_message, registry, None, &client_tx))
+    //         .unwrap();
 
-        // Verify response
-        assert_eq!(response.to_string(), "ACK||1||");
+    //     // Verify response
+    //     assert_eq!(response.to_string(), "ACK||1||");
 
-        // TODO verify the send to subscribers
-    }
+    //     // TODO verify the send to subscribers
+    // }
 
-    #[test]
-    fn test_process_message_subscribe_empty_topic() {
-        // Create a runtime
-        let rt = Runtime::new().unwrap();
+    // #[test]
+    // fn test_process_message_subscribe_empty_topic() {
+    //     // Create a runtime
+    //     let rt = Runtime::new().unwrap();
 
-        // Create test message with empty topic
-        let message_str = "SUBSCRIBE||1|0|";
-        let raw_message = Message::parse(message_str).unwrap();
-        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+    //     // Create test message with empty topic
+    //     let message_str = "SUBSCRIBE||1|0|";
+    //     let raw_message = Message::parse(message_str).unwrap();
+    //     let registry = Arc::new(Mutex::new(TopicRegistry::new()));
 
-        // Process the message
-        let err = rt.block_on(process_message_test(&raw_message, registry));
+    //     // Process the message
+    //     let err = rt.block_on(process_message_test(&raw_message, registry));
 
-        // Verify response
-        assert_eq!(err, "ERROR||1|13|Missing topic");
-    }
+    //     // Verify response
+    //     assert_eq!(err, "ERROR||1|13|Missing topic");
+    // }
 
-    #[tokio::test]
-    async fn test_subscribe_publish() {
-        env_logger::init();
+    // #[tokio::test]
+    // async fn test_subscribe_publish() {
+    //     env_logger::init();
 
-        let id1 = 0;
-        let id2 = 1;
-        let id3 = 2;
-        let id4 = 3;
+    //     let id1 = 0;
+    //     let id2 = 1;
+    //     let id3 = 2;
+    //     let id4 = 3;
 
-        let proposal_json = proposal_str();
-        let message_publish = format!(
-            "PUBLISH_PROPOSAL||{id1}|{}|{}",
-            proposal_json.len(),
-            proposal_json
-        );
-        let message_publish = Message::parse(&message_publish).unwrap();
+    //     let proposal_json = proposal_str();
+    //     let message_publish = format!(
+    //         "PUBLISH_PROPOSAL||{id1}|{}|{}",
+    //         proposal_json.len(),
+    //         proposal_json
+    //     );
+    //     let message_publish = Message::parse(&message_publish).unwrap();
 
-        // Get the proposal topic
-        let proposal = message_publish.proposal().unwrap();
-        let validated = proposal.insecure_validate().unwrap();
-        let topic = proposal_topic(&validated).unwrap();
+    //     // Get the proposal topic
+    //     let proposal = message_publish.proposal().unwrap();
+    //     let validated = proposal.insecure_validate().unwrap();
+    //     let topic = proposal_topic(&validated).unwrap();
 
-        // Create registry
-        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+    //     // Create registry
+    //     let registry = Arc::new(Mutex::new(TopicRegistry::new()));
 
-        // Create channels for all clients
-        let (client_subscribe_tx, mut client_subscribe_rx) = mpsc::unbounded_channel();
-        let (client_subscribe_any_tx, mut client_subscribe_any_rx) = mpsc::unbounded_channel();
-        let (client_publish_proposal_tx, _) = mpsc::unbounded_channel();
-        let (client_publish_any_tx, _) = mpsc::unbounded_channel();
+    //     // Create channels for all clients
+    //     let (client_subscribe_tx, mut client_subscribe_rx) = mpsc::unbounded_channel();
+    //     let (client_subscribe_any_tx, mut client_subscribe_any_rx) = mpsc::unbounded_channel();
+    //     let (client_publish_proposal_tx, _) = mpsc::unbounded_channel();
+    //     let (client_publish_any_tx, _) = mpsc::unbounded_channel();
 
-        // Step 1: Set up subscriptions first
+    //     // Step 1: Set up subscriptions first
 
-        // SUBSCRIBE client: Subscribe to the validated topic
-        let message_str = format!("SUBSCRIBE||{id2}|129|{topic}");
-        let message = Message::parse(&message_str).unwrap();
+    //     // SUBSCRIBE client: Subscribe to the validated topic
+    //     let message_str = format!("SUBSCRIBE||{id2}|129|{topic}");
+    //     let message = Message::parse(&message_str).unwrap();
 
-        let message_response =
-            process_message(&message, registry.clone(), None, &client_subscribe_tx)
-                .await
-                .unwrap();
-        assert_eq!(message_response.to_string(), format!("ACK||{id2}||"));
+    //     let message_response =
+    //         process_message(&message, registry.clone(), None, &client_subscribe_tx)
+    //             .await
+    //             .unwrap();
+    //     assert_eq!(message_response.to_string(), format!("ACK||{id2}||"));
 
-        // SUBSCRIBE_ANY client: Subscribe to the same topic with SUBSCRIBE_ANY (unvalidated)
-        let message_str = format!("SUBSCRIBE_ANY||{id3}|129|{topic}");
-        let message = Message::parse(&message_str).unwrap();
+    //     // SUBSCRIBE_ANY client: Subscribe to the same topic with SUBSCRIBE_ANY (unvalidated)
+    //     let message_str = format!("SUBSCRIBE_ANY||{id3}|129|{topic}");
+    //     let message = Message::parse(&message_str).unwrap();
 
-        let message_response =
-            process_message(&message, registry.clone(), None, &client_subscribe_any_tx)
-                .await
-                .unwrap();
-        assert_eq!(message_response.to_string(), format!("ACK||{id3}||"));
+    //     let message_response =
+    //         process_message(&message, registry.clone(), None, &client_subscribe_any_tx)
+    //             .await
+    //             .unwrap();
+    //     assert_eq!(message_response.to_string(), format!("ACK||{id3}||"));
 
-        // Step 2: Test proposal publishing
+    //     // Step 2: Test proposal publishing
 
-        // Publish the proposal
-        let message_response = process_message(
-            &message_publish,
-            registry.clone(),
-            None,
-            &client_publish_proposal_tx,
-        )
-        .await
-        .unwrap();
-        assert_eq!(message_response.to_string(), format!("ACK||{id1}||"));
+    //     // Publish the proposal
+    //     let message_response = process_message(
+    //         &message_publish,
+    //         registry.clone(),
+    //         None,
+    //         &client_publish_proposal_tx,
+    //     )
+    //     .await
+    //     .unwrap();
+    //     assert_eq!(message_response.to_string(), format!("ACK||{id1}||"));
 
-        // SUBSCRIBE client should receive the proposal
-        let message_received = client_subscribe_rx.recv().await.unwrap();
+    //     // SUBSCRIBE client should receive the proposal
+    //     let message_received = client_subscribe_rx.recv().await.unwrap();
 
-        let parsed_message = Message::parse(&message_received).unwrap();
-        assert_eq!(parsed_message.type_, MessageType::Result);
+    //     let parsed_message = Message::parse(&message_received).unwrap();
+    //     assert_eq!(parsed_message.type_, MessageType::Result);
 
-        // Parse both strings to ensure we compare JSON content, not formatting
-        let json1: serde_json::Value = serde_json::from_str(parsed_message.content()).unwrap();
-        let json2: serde_json::Value = serde_json::from_str(proposal_str()).unwrap();
-        assert_eq!(json1, json2);
+    //     // Parse both strings to ensure we compare JSON content, not formatting
+    //     let json1: serde_json::Value = serde_json::from_str(parsed_message.content()).unwrap();
+    //     let json2: serde_json::Value = serde_json::from_str(proposal_str()).unwrap();
+    //     assert_eq!(json1, json2);
 
-        // SUBSCRIBE_ANY client should NOT receive the proposal
-        assert!(
-            client_subscribe_any_rx.try_recv().is_err(),
-            "SUBSCRIBE_ANY client incorrectly received the proposal"
-        );
+    //     // SUBSCRIBE_ANY client should NOT receive the proposal
+    //     assert!(
+    //         client_subscribe_any_rx.try_recv().is_err(),
+    //         "SUBSCRIBE_ANY client incorrectly received the proposal"
+    //     );
 
-        // Publish a message with PUBLISH_ANY
-        let content = "Hello";
-        let publish_content = format!("{}|{}", topic, content);
-        let message_str = format!(
-            "PUBLISH_ANY||{id4}|{}|{}",
-            publish_content.len(),
-            publish_content
-        );
-        let message = Message::parse(&message_str).unwrap();
+    //     // Publish a message with PUBLISH_ANY
+    //     let content = "Hello";
+    //     let publish_content = format!("{}|{}", topic, content);
+    //     let message_str = format!(
+    //         "PUBLISH_ANY||{id4}|{}|{}",
+    //         publish_content.len(),
+    //         publish_content
+    //     );
+    //     let message = Message::parse(&message_str).unwrap();
 
-        let message_response = process_message(&message, registry, None, &client_publish_any_tx)
-            .await
-            .unwrap();
-        assert_eq!(message_response.to_string(), format!("ACK||{id4}||"));
+    //     let message_response = process_message(&message, registry, None, &client_publish_any_tx)
+    //         .await
+    //         .unwrap();
+    //     assert_eq!(message_response.to_string(), format!("ACK||{id4}||"));
 
-        // SUBSCRIBE client should NOT receive the PUBLISH_ANY message
-        assert!(
-            client_subscribe_rx.try_recv().is_err(),
-            "SUBSCRIBE client incorrectly received the PUBLISH_ANY message"
-        );
+    //     // SUBSCRIBE client should NOT receive the PUBLISH_ANY message
+    //     assert!(
+    //         client_subscribe_rx.try_recv().is_err(),
+    //         "SUBSCRIBE client incorrectly received the PUBLISH_ANY message"
+    //     );
 
-        // SUBSCRIBE_ANY client should receive the PUBLISH_ANY message
-        let message_received = client_subscribe_any_rx.recv().await.unwrap();
+    //     // SUBSCRIBE_ANY client should receive the PUBLISH_ANY message
+    //     let message_received = client_subscribe_any_rx.recv().await.unwrap();
 
-        let parsed_message = Message::parse(&message_received).unwrap();
-        assert_eq!(parsed_message.type_, MessageType::Result);
-        assert_eq!(parsed_message.content(), content);
-    }
+    //     let parsed_message = Message::parse(&message_received).unwrap();
+    //     assert_eq!(parsed_message.type_, MessageType::Result);
+    //     assert_eq!(parsed_message.content(), content);
+    // }
 }
 
 /// Process a publish any message

@@ -33,6 +33,10 @@ fn ping(id: i64) -> JsonRpc {
     JsonRpc::request(id, &MessageType::Ping.to_string())
 }
 
+pub fn pong(id: i64) -> JsonRpc {
+    JsonRpc::request(id, &MessageType::Pong.to_string())
+}
+
 fn parse_ping(notification: JsonRpc) -> Option<i64> {
     if notification.get_method() != Some(&MessageType::Ping.to_string()) {
         return None;
@@ -41,7 +45,7 @@ fn parse_ping(notification: JsonRpc) -> Option<i64> {
     Some(id)
 }
 
-fn parse_id(id: Id) -> Option<i64> {
+pub fn parse_id(id: Id) -> Option<i64> {
     match id {
         Id::Num(n) => Some(n),
         _ => None,
