@@ -2,6 +2,7 @@ use clap::Parser;
 use elements::bitcoin::NetworkKind;
 use elements::AddressParams;
 use futures_util::{SinkExt, StreamExt};
+use jsonrpc_lite::JsonRpc;
 use message::{Error, Message, MessageType};
 use node::Node;
 use std::collections::HashMap;
@@ -280,10 +281,11 @@ pub async fn handle_connection(
         if let TokioMessage::Text(text) = msg {
             let raw_message = match Message::parse(&text) {
                 Ok(msg) => msg,
-                Err(e) => {
-                    let error_string = e.to_string();
-                    let message_response = Message::new(MessageType::Error, None, &error_string);
-                    if client_tx_clone.send(message_response.to_string()).is_err() {
+                Err(_) => {
+                    let rpc_error = jsonrpc_lite::Error::new(jsonrpc_lite::ErrorCode::ParseError);
+                    let err = JsonRpc::error(0, rpc_error);
+                    let err_str = serde_json::to_string(&err).unwrap();
+                    if client_tx_clone.send(err_str).is_err() {
                         break;
                     }
                     continue;
