@@ -1587,6 +1587,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonrpc-lite"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb4128aba82294c14af2998831c4df3c843940e92b5cfc41bac1229d1e63b88c"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "jwalk"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1781,6 +1792,7 @@ dependencies = [
  "env_logger",
  "futures-util",
  "hex",
+ "jsonrpc-lite",
  "log",
  "lwk_wollet",
  "reqwest 0.11.27",

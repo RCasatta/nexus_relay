@@ -1,0 +1,64 @@
+use jsonrpc_lite::Id;
+use jsonrpc_lite::JsonRpc;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::message::MessageType;
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+struct TopicContent {
+    topic: String,
+    content: String,
+}
+
+fn subscribe_any(id: i64, topic: String, content: String) -> JsonRpc {
+    let params = TopicContent { topic, content };
+    let params: Value = serde_json::to_value(params).unwrap();
+    JsonRpc::request_with_params(id, &MessageType::SubscribeAny.to_string(), params)
+}
+
+fn parse_subscribe_any(notification: JsonRpc) -> Option<(i64, TopicContent)> {
+    if notification.get_method() != Some(&MessageType::SubscribeAny.to_string()) {
+        return None;
+    }
+    let id = parse_id(notification.get_id()?)?;
+    let params = notification.get_params()?;
+    let params_str = serde_json::to_string(&params).ok()?;
+    let topic_content: TopicContent = serde_json::from_str(&params_str).ok()?;
+
+    Some((id, topic_content))
+}
+
+fn parse_id(id: Id) -> Option<i64> {
+    match id {
+        Id::Num(n) => Some(n),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_jsonrpc_notification() {
+        let request = subscribe_any(10, "test".to_string(), "content".to_string());
+        let expected = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "SUBSCRIBE_ANY",
+            "params": {
+                "topic": "test",
+                "content": "content"
+            }
+        });
+        let result = serde_json::to_value(&request).unwrap();
+        assert_eq!(result, expected);
+        let (id, topic_content) = parse_subscribe_any(request).unwrap();
+        assert_eq!(id, 10);
+        assert_eq!(topic_content.topic, "test");
+        assert_eq!(topic_content.content, "content");
+    }
+}

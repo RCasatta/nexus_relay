@@ -11,6 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as TokioMessage;
 
+pub mod jsonrpc;
 pub mod message;
 pub mod node;
 pub mod proposal;
