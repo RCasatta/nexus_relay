@@ -180,7 +180,8 @@ pub async fn process_message(
     let method = parse_method(&message_request).ok_or(Error::NotImplemented)?;
     match method {
         Methods::Ping => {
-            let id = parse_id(message_request.get_id().unwrap()).unwrap();
+            let id = parse_id(message_request.get_id().ok_or(Error::InvalidId)?)
+                .ok_or(Error::InvalidId)?;
             let response = JsonRpc::success(id, &Value::String("pong".to_string()));
             Ok(response)
         }
@@ -316,7 +317,7 @@ pub async fn handle_connection(
                 Err(e) => {
                     let rpc_error =
                         jsonrpc_lite::Error::new(jsonrpc_lite::ErrorCode::InternalError);
-                    let err = JsonRpc::error(0, rpc_error);
+                    let err = JsonRpc::error((), rpc_error);
                     let err_str = serde_json::to_string(&err).unwrap();
                     err_str
                 }
