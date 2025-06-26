@@ -17,6 +17,8 @@ pub enum Params {
     Any(Any),
     Address(Address),
     Tx(Tx),
+    Proposal(ProposalPair),
+    Wallet(Wallet),
     Empty,
 }
 
@@ -58,6 +60,14 @@ pub struct TopicContent {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Any {
     pub topic: String,
+
+    /// It's absent for subscribe, present for publish
+    pub content: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct PublishAny {
+    pub topic: String,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -68,6 +78,20 @@ pub struct Address {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Tx {
     pub txid: String,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct ProposalPair {
+    /// Asset id in input (the maker is selling this)
+    pub input: String,
+
+    /// Asset id in output (the maker is buying this)
+    pub output: String,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Wallet {
+    pub id: String,
 }
 
 pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
@@ -93,6 +117,14 @@ pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
                             let tx: Tx = serde_json::from_value(value).unwrap();
                             Ok(Params::Tx(tx))
                         }
+                        "proposal" => {
+                            let proposal: ProposalPair = serde_json::from_value(value).unwrap();
+                            Ok(Params::Proposal(proposal))
+                        }
+                        "wallet" => {
+                            let pset: Wallet = serde_json::from_value(value).unwrap();
+                            Ok(Params::Wallet(pset))
+                        }
                         _ => Err(Error::InvalidParams),
                     },
                     None => Ok(Params::Empty),
@@ -112,43 +144,33 @@ pub fn parse_method(jsonrpc: &JsonRpc) -> Option<Methods> {
 
 impl Params {
     pub fn validate_for_method(&self, method: &Methods) -> Result<(), Error> {
+        println!("validate_for_method: {:?}, {:?}", self, method);
         match (self, method) {
-            (Params::Any(_), Methods::Subscribe) => Ok(()),
+            (Params::Any(any), e) => match e {
+                Methods::Subscribe => {
+                    if any.content.is_some() {
+                        Err(Error::InvalidParams)
+                    } else {
+                        Ok(())
+                    }
+                }
+                Methods::Publish => {
+                    if any.content.is_none() {
+                        Err(Error::InvalidParams)
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => Err(Error::InvalidParams),
+            },
             (Params::Address(_), Methods::Subscribe) => Ok(()),
             (Params::Tx(_), Methods::Subscribe) => Ok(()),
+            (Params::Wallet(_), Methods::Subscribe) => Ok(()),
             (Params::Empty, Methods::Ping) => Ok(()),
+            (Params::Proposal(_), Methods::Subscribe) => Ok(()),
             _ => Err(Error::InvalidParamsForThisMethod),
         }
     }
-}
-// fn subscribe(id: i64, topic: String, content: String) -> JsonRpc {
-//     let params = TopicContent { topic, content };
-//     let params: Value = serde_json::to_value(params).unwrap();
-//     JsonRpc::request_with_params(id, &Methods::Subscribe.to_string(), params)
-// }
-
-// fn parse_subscribe_any(notification: JsonRpc) -> Option<(i64, TopicContent)> {
-//     if notification.get_method() != Some(&Methods::Subscribe.to_string()) {
-//         return None;
-//     }
-//     let id = parse_id(notification.get_id()?)?;
-//     let params = notification.get_params()?;
-//     let params_str = serde_json::to_string(&params).ok()?;
-//     let topic_content: TopicContent = serde_json::from_str(&params_str).ok()?;
-
-//     Some((id, topic_content))
-// }
-
-fn ping(id: i64) -> JsonRpc {
-    JsonRpc::request(id, &Methods::Ping.to_string())
-}
-
-fn parse_ping(notification: JsonRpc) -> Option<i64> {
-    if notification.get_method() != Some(&Methods::Ping.to_string()) {
-        return None;
-    }
-    let id = parse_id(notification.get_id()?)?;
-    Some(id)
 }
 
 pub fn parse_id(id: Id) -> Option<i64> {
@@ -166,12 +188,12 @@ mod tests {
 
     #[test]
     fn test_nexus_request_ping() {
-        let ping = json!({
+        let jsonrpc = json!({
             "id": 10,
             "jsonrpc": "2.0",
             "method": "ping"
         });
-        let jsonrpc: JsonRpc = serde_json::from_value(ping).unwrap();
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
         assert_eq!(request.method, Methods::Ping);
         assert_eq!(request.params, Params::Empty);
@@ -179,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_nexus_request_subscribe_any() {
-        let ping = json!({
+        let jsonrpc = json!({
             "id": 10,
             "jsonrpc": "2.0",
             "method": "subscribe",
@@ -189,20 +211,71 @@ mod tests {
                 }
             }
         });
-        let jsonrpc: JsonRpc = serde_json::from_value(ping).unwrap();
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
         assert_eq!(request.method, Methods::Subscribe);
         assert_eq!(
             request.params,
             Params::Any(Any {
-                topic: "test".to_string()
+                topic: "test".to_string(),
+                content: None
+            })
+        );
+    }
+
+    #[test]
+    fn test_nexus_request_subscribe_proposal() {
+        let jsonrpc = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "subscribe",
+            "params": {
+                "proposal": {
+                    "input": "test",
+                    "output": "best"
+                }
+            }
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
+        let request = NexusRequest::try_from(jsonrpc).unwrap();
+        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(
+            request.params,
+            Params::Proposal(ProposalPair {
+                input: "test".to_string(),
+                output: "best".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_nexus_request_publish_any() {
+        let jsonrpc = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "publish",
+            "params": {
+                "any": {
+                    "topic": "test",
+                    "content": "content"
+                }
+            }
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
+        let request = NexusRequest::try_from(jsonrpc).unwrap();
+        assert_eq!(request.method, Methods::Publish);
+        assert_eq!(
+            request.params,
+            Params::Any(Any {
+                topic: "test".to_string(),
+                content: Some("content".to_string())
             })
         );
     }
 
     #[test]
     fn test_nexus_request_subscribe_address() {
-        let ping = json!({
+        let jsonrpc = json!({
             "id": 10,
             "jsonrpc": "2.0",
             "method": "subscribe",
@@ -212,7 +285,7 @@ mod tests {
                 }
             }
         });
-        let jsonrpc: JsonRpc = serde_json::from_value(ping).unwrap();
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
         assert_eq!(request.method, Methods::Subscribe);
         assert_eq!(
@@ -225,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_nexus_request_subscribe_tx() {
-        let ping = json!({
+        let jsonrpc = json!({
             "id": 10,
             "jsonrpc": "2.0",
             "method": "subscribe",
@@ -235,7 +308,7 @@ mod tests {
                 }
             }
         });
-        let jsonrpc: JsonRpc = serde_json::from_value(ping).unwrap();
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
         assert_eq!(request.method, Methods::Subscribe);
         assert_eq!(
@@ -247,35 +320,25 @@ mod tests {
     }
 
     #[test]
-    fn test_jsonrpc_notification() {
-        // let request = subscribe(10, "test".to_string(), "content".to_string());
-        // let expected = json!({
-        //     "id": 10,
-        //     "jsonrpc": "2.0",
-        //     "method": "subscribe",
-        //     "params": {
-        //         "any": {
-        //             "topic": "test",
-        //             "content": "content"
-        //         }
-        //     }
-        // });
-        // let result = serde_json::to_value(&request).unwrap();
-        // assert_eq!(result, expected);
-        // let (id, topic_content) = parse_subscribe_any(request).unwrap();
-        // assert_eq!(id, 10);
-        // assert_eq!(topic_content.topic, "test");
-        // assert_eq!(topic_content.content, "content");
-
-        let ping = ping(10);
-        let expected = json!({
+    fn test_nexus_request_subscribe_wallet() {
+        let jsonrpc = json!({
             "id": 10,
             "jsonrpc": "2.0",
-            "method": "ping"
+            "method": "subscribe",
+            "params": {
+                "wallet": {
+                    "id": "walletid"
+                }
+            }
         });
-        let result = serde_json::to_value(&ping).unwrap();
-        assert_eq!(result, expected);
-        let id = parse_ping(ping).unwrap();
-        assert_eq!(id, 10);
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
+        let request = NexusRequest::try_from(jsonrpc).unwrap();
+        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(
+            request.params,
+            Params::Wallet(Wallet {
+                id: "walletid".to_string()
+            })
+        );
     }
 }
