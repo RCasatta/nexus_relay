@@ -178,12 +178,18 @@ pub async fn process_message(
     client_tx_clone: &mpsc::UnboundedSender<String>,
 ) -> Result<JsonRpc, Box<dyn std::error::Error>> {
     let method = parse_method(&message_request).ok_or(Error::NotImplemented)?;
+    let id = parse_id(message_request.get_id().ok_or(Error::InvalidId)?).ok_or(Error::InvalidId)?;
     match method {
         Methods::Ping => {
-            let id = parse_id(message_request.get_id().ok_or(Error::InvalidId)?)
-                .ok_or(Error::InvalidId)?;
             let response = JsonRpc::success(id, &Value::String("pong".to_string()));
             Ok(response)
+        }
+        Methods::Subscribe => {
+            // TODO do other subscribe other than any
+            subscribe_to_topic(id, message_request, registry, client_tx_clone, false)
+        }
+        Methods::Publish => {
+            todo!()
         }
         _ => Err(Box::new(Error::NotImplemented)),
     }
@@ -219,34 +225,35 @@ pub async fn process_message(
     // }
 }
 
-// fn subscribe_to_topic<'a>(
-//     message_request: &'a Message<'a>,
-//     registry: Arc<Mutex<TopicRegistry>>,
-//     client_tx: &mpsc::UnboundedSender<String>,
-//     is_validated: bool,
-// ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
-//     let topic = message_request.content().to_string();
-//     if topic.is_empty() {
-//         return Err(Box::new(Error::MissingTopic));
-//     }
-//     if topic.len() > 129 {
-//         return Err(Box::new(Error::InvalidTopic));
-//     }
+fn subscribe_to_topic(
+    id: i64,
+    message_request: JsonRpc,
+    registry: Arc<Mutex<TopicRegistry>>,
+    client_tx: &mpsc::UnboundedSender<String>,
+    is_validated: bool,
+) -> Result<JsonRpc, Box<dyn std::error::Error>> {
+    let topic = "".to_string();
+    if topic.is_empty() {
+        return Err(Box::new(Error::MissingTopic));
+    }
+    if topic.len() > 64 {
+        return Err(Box::new(Error::InvalidTopic));
+    }
 
-//     // Lock the mutex only when needed and release it immediately
-//     {
-//         let mut registry_guard = registry.lock().unwrap();
-//         let topic = if is_validated {
-//             Topic::Validated(topic)
-//         } else {
-//             Topic::Unvalidated(topic)
-//         };
-//         registry_guard.subscribe(topic, client_tx.clone());
-//     }
+    // Lock the mutex only when needed and release it immediately
+    {
+        let mut registry_guard = registry.lock().unwrap();
+        let topic = if is_validated {
+            Topic::Validated(topic)
+        } else {
+            Topic::Unvalidated(topic)
+        };
+        registry_guard.subscribe(topic, client_tx.clone());
+    }
 
-//     let message_response = Message::ack(message_request.random_id);
-//     Ok(message_response)
-// }
+    let message_response = JsonRpc::success(id, &Value::String("ACK".to_string()));
+    Ok(message_response)
+}
 
 pub async fn handle_connection(
     stream: TcpStream,
@@ -545,8 +552,8 @@ mod tests {
 }
 
 // Process a publish any message
-// fn process_publish_any<'a>(
-//     message_request: &'a Message<'a>,
+// fn process_publish_any(
+//     message_request: JsonRpc,
 //     registry: Arc<Mutex<TopicRegistry>>,
 //     random_id: Option<u64>,
 // ) -> Result<Message<'a>, Box<dyn std::error::Error>> {

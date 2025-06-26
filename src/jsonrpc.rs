@@ -3,14 +3,104 @@ use std::str::FromStr;
 use jsonrpc_lite::Id;
 use jsonrpc_lite::JsonRpc;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use std::fmt;
 
 use crate::message::Methods;
 
+pub struct NexusRequest {
+    pub method: Methods,
+    pub params: Params,
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-struct TopicContent {
-    topic: String,
-    content: String,
+pub enum Params {
+    Any(Any),
+    Address(Address),
+    Tx(Tx),
+    Empty,
+}
+
+#[derive(Debug)]
+pub enum Error {
+    InvalidMethod,
+    InvalidParams,
+    InvalidParamsForThisMethod,
+    ArrayParamsAreInvalid,
+    ParamsMustContainASingleRootElement,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl TryFrom<JsonRpc> for NexusRequest {
+    type Error = Error;
+
+    fn try_from(jsonrpc: JsonRpc) -> Result<Self, Self::Error> {
+        let method = parse_method(&jsonrpc).ok_or(Error::InvalidMethod)?;
+        let params = parse_params(&jsonrpc)?;
+        params.validate_for_method(&method)?;
+
+        Ok(NexusRequest { method, params })
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct TopicContent {
+    pub topic: String,
+    pubcontent: String,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Any {
+    pub topic: String,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Address {
+    pub address: String,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Tx {
+    pub txid: String,
+}
+
+pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
+    match jsonrpc.get_params() {
+        None => Ok(Params::Empty),
+        Some(params) => match params {
+            jsonrpc_lite::Params::Array(_) => Err(Error::ArrayParamsAreInvalid),
+            jsonrpc_lite::Params::Map(map) => {
+                if map.len() != 1 {
+                    return Err(Error::ParamsMustContainASingleRootElement);
+                }
+                match map.into_iter().next() {
+                    Some((key, value)) => match key.as_str() {
+                        "any" => {
+                            let any: Any = serde_json::from_value(value).unwrap();
+                            Ok(Params::Any(any))
+                        }
+                        "address" => {
+                            let address: Address = serde_json::from_value(value).unwrap();
+                            Ok(Params::Address(address))
+                        }
+                        "tx" => {
+                            let tx: Tx = serde_json::from_value(value).unwrap();
+                            Ok(Params::Tx(tx))
+                        }
+                        _ => Err(Error::InvalidParams),
+                    },
+                    None => Ok(Params::Empty),
+                }
+            }
+            jsonrpc_lite::Params::None(_) => Ok(Params::Empty),
+        },
+    }
 }
 
 pub fn parse_method(jsonrpc: &JsonRpc) -> Option<Methods> {
@@ -20,6 +110,17 @@ pub fn parse_method(jsonrpc: &JsonRpc) -> Option<Methods> {
     }
 }
 
+impl Params {
+    pub fn validate_for_method(&self, method: &Methods) -> Result<(), Error> {
+        match (self, method) {
+            (Params::Any(_), Methods::Subscribe) => Ok(()),
+            (Params::Address(_), Methods::Subscribe) => Ok(()),
+            (Params::Tx(_), Methods::Subscribe) => Ok(()),
+            (Params::Empty, Methods::Ping) => Ok(()),
+            _ => Err(Error::InvalidParamsForThisMethod),
+        }
+    }
+}
 // fn subscribe(id: i64, topic: String, content: String) -> JsonRpc {
 //     let params = TopicContent { topic, content };
 //     let params: Value = serde_json::to_value(params).unwrap();
@@ -62,6 +163,88 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn test_nexus_request_ping() {
+        let ping = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "ping"
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(ping).unwrap();
+        let request = NexusRequest::try_from(jsonrpc).unwrap();
+        assert_eq!(request.method, Methods::Ping);
+        assert_eq!(request.params, Params::Empty);
+    }
+
+    #[test]
+    fn test_nexus_request_subscribe_any() {
+        let ping = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "subscribe",
+            "params": {
+                "any": {
+                    "topic": "test"
+                }
+            }
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(ping).unwrap();
+        let request = NexusRequest::try_from(jsonrpc).unwrap();
+        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(
+            request.params,
+            Params::Any(Any {
+                topic: "test".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_nexus_request_subscribe_address() {
+        let ping = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "subscribe",
+            "params": {
+                "address": {
+                    "address": "test"
+                }
+            }
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(ping).unwrap();
+        let request = NexusRequest::try_from(jsonrpc).unwrap();
+        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(
+            request.params,
+            Params::Address(Address {
+                address: "test".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_nexus_request_subscribe_tx() {
+        let ping = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "subscribe",
+            "params": {
+                "tx": {
+                    "txid": "test"
+                }
+            }
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(ping).unwrap();
+        let request = NexusRequest::try_from(jsonrpc).unwrap();
+        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(
+            request.params,
+            Params::Tx(Tx {
+                txid: "test".to_string()
+            })
+        );
+    }
 
     #[test]
     fn test_jsonrpc_notification() {

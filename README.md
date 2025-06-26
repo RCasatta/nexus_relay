@@ -50,11 +50,21 @@ Response:
 
 There are various different subscription:
 
-* `any` general one on a `topic` and a `content` without any validation from the nexus relay
+* `any` subscribe on a general`topic` without any filtering from the nexus relay
 * `address` subscribe to the given unconfidential address to be informed about transaction containing this address entering the mempool or being confirmed in a block
 * `txid` subscribe to the transaction id to receive information when the transaction enter the mempool or it's confirmed in a block
 * `pset` subscribe to pset created for wallet identified by `<wallet_id>`
 * `proposal` subscribe to receive liquidex proposals involving `<buy_asset_id>_<sell_asset_id>`
+
+Any:
+
+```json
+{"jsonrpc": "2.0", "method": "ping", "id": 1, "params": {"any": {"topic":"the-topic"}}}
+```
+
+Pset:
+
+https://github.com/bitcoin/bips/blob/master/bip-0370.mediawiki#unique-identification
 
 ### Publish
 
