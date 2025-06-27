@@ -23,6 +23,8 @@ pub enum Params {
     Wallet(Wallet),
     Empty,
     Proposal(Proposal),
+    Pset(Pset),
+    Ping,
 }
 
 #[derive(Debug)]
@@ -98,6 +100,12 @@ pub struct Wallet {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct Pset {
+    pub wallet_id: String,
+    pub pset: String,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Proposal {
     pub proposal: LiquidexProposal<Unvalidated>,
 }
@@ -138,6 +146,11 @@ pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
                             let pset: Wallet = serde_json::from_value(value).unwrap();
                             Ok(Params::Wallet(pset))
                         }
+                        "pset" => {
+                            let pset: Pset = serde_json::from_value(value).unwrap();
+                            Ok(Params::Pset(pset))
+                        }
+                        "ping" => Ok(Params::Ping),
                         _ => Err(Error::InvalidParams),
                     },
                     None => Ok(Params::Empty),
@@ -179,9 +192,10 @@ impl Params {
             (Params::Address(_), Methods::Subscribe) => Ok(()),
             (Params::Tx(_), Methods::Subscribe) => Ok(()),
             (Params::Wallet(_), Methods::Subscribe) => Ok(()),
-            (Params::Empty, Methods::Ping) => Ok(()),
             (Params::ProposalPair(_), Methods::Subscribe) => Ok(()),
             (Params::Proposal(_), Methods::Publish) => Ok(()),
+            (Params::Pset(_), Methods::Publish) => Ok(()),
+            (Params::Ping, Methods::Publish) => Ok(()),
             _ => Err(Error::InvalidParamsForThisMethod),
         }
     }
@@ -209,12 +223,15 @@ mod tests {
         let jsonrpc = json!({
             "id": 10,
             "jsonrpc": "2.0",
-            "method": "ping"
+            "method": "publish",
+            "params": {
+                "ping": {}
+            }
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Ping);
-        assert_eq!(request.params, Params::Empty);
+        assert_eq!(request.method, Methods::Publish);
+        assert_eq!(request.params, Params::Ping);
     }
 
     #[test]
@@ -378,6 +395,31 @@ mod tests {
         assert_eq!(
             request.params,
             Params::Proposal(Proposal { proposal: proposal })
+        );
+    }
+
+    #[test]
+    fn test_nexus_request_publish_pset() {
+        let jsonrpc = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "method": "publish",
+            "params": {
+                "pset": {
+                    "wallet_id": "walletid",
+                    "pset": "base64"
+                }
+            }
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
+        let request = NexusRequest::try_from(jsonrpc).unwrap();
+        assert_eq!(request.method, Methods::Publish);
+        assert_eq!(
+            request.params,
+            Params::Pset(Pset {
+                wallet_id: "walletid".to_string(),
+                pset: "base64".to_string()
+            })
         );
     }
 }

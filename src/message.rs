@@ -16,7 +16,6 @@ pub enum Methods {
     Publish,
     Subscribe,
     Unsubscribe,
-    Ping,
 }
 
 impl fmt::Display for Methods {
@@ -25,7 +24,6 @@ impl fmt::Display for Methods {
             Methods::Publish => write!(f, "publish"),
             Methods::Subscribe => write!(f, "subscribe"),
             Methods::Unsubscribe => write!(f, "unsubscribe"),
-            Methods::Ping => write!(f, "ping"),
         }
     }
 }
@@ -38,7 +36,6 @@ impl FromStr for Methods {
             "publish" => Ok(Methods::Publish),
             "subscribe" => Ok(Methods::Subscribe),
             "unsubscribe" => Ok(Methods::Unsubscribe),
-            "ping" => Ok(Methods::Ping),
             _ => Err(Error::InvalidMessage),
         }
     }
@@ -210,12 +207,7 @@ mod tests {
     #[test]
     fn test_message_type_roundtrip() {
         // Test all variants of MessageType for roundtrip conversion
-        let types = vec![
-            Methods::Publish,
-            Methods::Subscribe,
-            Methods::Unsubscribe,
-            Methods::Ping,
-        ];
+        let types = vec![Methods::Publish, Methods::Subscribe, Methods::Unsubscribe];
 
         for msg_type in types {
             // Convert MessageType to string

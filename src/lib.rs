@@ -180,10 +180,6 @@ pub async fn process_message(
     let method = parse_method(&message_request).ok_or(Error::NotImplemented)?;
     let id = parse_id(message_request.get_id().ok_or(Error::InvalidId)?).ok_or(Error::InvalidId)?;
     match method {
-        Methods::Ping => {
-            let response = JsonRpc::success(id, &Value::String("pong".to_string()));
-            Ok(response)
-        }
         Methods::Subscribe => {
             // TODO do other subscribe other than any
             subscribe_to_topic(id, message_request, registry, client_tx_clone, false)
