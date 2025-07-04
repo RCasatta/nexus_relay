@@ -227,7 +227,7 @@ pub async fn process_message(
 }
 
 fn subscribe_to_topic(
-    id: i64,
+    id: u32,
     topic: Topic,
     registry: Arc<Mutex<TopicRegistry>>,
     client_tx: &mpsc::UnboundedSender<String>,

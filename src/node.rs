@@ -58,8 +58,10 @@ impl Node {
 
 #[cfg(test)]
 mod tests {
+    use crate::jsonrpc::{NexusRequest, NexusResponse};
     use crate::{async_main, Config, Network};
     use futures_util::{SinkExt, StreamExt};
+    use jsonrpc_lite::JsonRpc;
 
     use super::Node;
     use bitcoind::bitcoincore_rpc::RpcApi;
@@ -232,126 +234,129 @@ mod tests {
         assert!(is_spent);
     }
 
-    // #[tokio::test]
-    // async fn test_publish_from_zmq() {
-    //     let elementsd_exe = env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set");
-    //     let (elementsd, zmq_port) = launch_elementsd(elementsd_exe);
-    //     let base_url = elementsd.rpc_url().to_string();
+    #[tokio::test]
+    async fn test_publish_from_zmq() {
+        let elementsd_exe = env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set");
+        let (elementsd, zmq_port) = launch_elementsd(elementsd_exe);
+        let base_url = elementsd.rpc_url().to_string();
 
-    //     let test_node = TestNode::new(elementsd);
+        let test_node = TestNode::new(elementsd);
 
-    //     // Rescan blockchain to recognize initialfreecoins
-    //     test_node.rescan_blockchain().unwrap();
+        // Rescan blockchain to recognize initialfreecoins
+        test_node.rescan_blockchain().unwrap();
 
-    //     let port = bitcoind::get_available_port().unwrap();
+        let port = bitcoind::get_available_port().unwrap();
 
-    //     let config = Config {
-    //         base_url,
-    //         zmq_endpoint: format!("tcp://127.0.0.1:{}", zmq_port),
-    //         network: Network::ElementsRegtest,
-    //         port,
-    //     };
+        let config = Config {
+            base_url,
+            zmq_endpoint: format!("tcp://127.0.0.1:{}", zmq_port),
+            network: Network::ElementsRegtest,
+            port,
+        };
 
-    //     tokio::spawn(async move {
-    //         async_main(config).await.unwrap();
-    //     });
+        tokio::spawn(async move {
+            async_main(config).await.unwrap();
+        });
 
-    //     // Give the server a moment to start up
-    //     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Give the server a moment to start up
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    //     // Generate some initial blocks to get funds
-    //     let funding_address = test_node.get_new_address().unwrap();
-    //     test_node
-    //         .generate_to_address(101, &funding_address)
-    //         .unwrap();
+        // Generate some initial blocks to get funds
+        let funding_address = test_node.get_new_address().unwrap();
+        test_node
+            .generate_to_address(101, &funding_address)
+            .unwrap();
 
-    //     // Check balance and generate more blocks if needed
-    //     let balance = test_node.get_balance().unwrap();
-    //     assert!(balance > 0.0);
+        // Check balance and generate more blocks if needed
+        let balance = test_node.get_balance().unwrap();
+        assert!(balance > 0.0);
 
-    //     // Get a new address to subscribe to (different from funding address)
-    //     let target_address = test_node.get_new_address().unwrap();
-    //     let target_address_str = target_address.to_unconfidential().to_string();
+        // Get a new address to subscribe to (different from funding address)
+        let target_address = test_node.get_new_address().unwrap();
+        let target_address_str = target_address.to_unconfidential().to_string();
 
-    //     // Connect to the WebSocket server
-    //     let ws_url = format!("ws://127.0.0.1:{}", port);
-    //     let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
-    //         .await
-    //         .expect("Failed to connect to WebSocket");
+        // Connect to the WebSocket server
+        let ws_url = format!("ws://127.0.0.1:{}", port);
+        let (ws_stream, _) = tokio_tungstenite::connect_async(&ws_url)
+            .await
+            .expect("Failed to connect to WebSocket");
 
-    //     let (mut ws_sender, mut ws_receiver) = ws_stream.split();
+        let (mut ws_sender, mut ws_receiver) = ws_stream.split();
 
-    //     // Subscribe to the target address
-    //     let subscribe_message = format!(
-    //         "SUBSCRIBE||12345|{}|{}",
-    //         target_address_str.len(),
-    //         target_address_str
-    //     );
-    //     println!("Subscribe message: {}", subscribe_message);
+        // Subscribe to the target address
+        let id = 12345;
+        let subscribe_message =
+            NexusRequest::new_address_subscribe(id, &target_address_str).to_string();
 
-    //     use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
-    //     ws_sender
-    //         .send(TungsteniteMessage::Text(subscribe_message))
-    //         .await
-    //         .expect("Failed to send subscribe message");
+        println!("Subscribe message: {}", subscribe_message);
 
-    //     // Wait for subscription confirmation
-    //     if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
-    //         println!("Subscribe response: {}", text);
-    //         // Should receive an ACK message
-    //         assert!(text.contains("ACK") || text.contains("RESULT"));
-    //     } else {
-    //         assert!(false);
-    //     }
+        use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
+        ws_sender
+            .send(TungsteniteMessage::Text(subscribe_message))
+            .await
+            .expect("Failed to send subscribe message");
 
-    //     // Now send funds to the target address (this should trigger a rawtx ZMQ notification)
-    //     let txid = test_node.send_to_address(&target_address, 1.0).unwrap();
-    //     println!("Sent transaction to address: {}", target_address_str);
+        // Wait for subscription confirmation
+        if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+            println!("Subscribe response: {}", text);
+            let response = NexusResponse::new_subscribed(id);
+            let jsonrpc = JsonRpc::parse(&text).unwrap();
+            assert_eq!(jsonrpc, response.into());
+        } else {
+            assert!(false);
+        }
 
-    //     // Wait for the address notification from ZMQ
-    //     if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
-    //         println!("Received message: {}", text);
-    //         assert!(text.contains("RESULT") && text.contains(&target_address_str));
-    //     } else {
-    //         assert!(false);
-    //     }
+        // Now send funds to the target address (this should trigger a rawtx ZMQ notification)
+        let txid = test_node.send_to_address(&target_address, 1.0).unwrap();
+        println!(
+            "Sent transaction to address: {}",
+            target_address.to_string()
+        );
 
-    //     // Subscribe to the transaction ID
-    //     let subscribe_txid_message = format!("SUBSCRIBE||54321|{}|{}", txid.len(), txid);
-    //     println!("Subscribe to txid message: {}", subscribe_txid_message);
+        // Wait for the address notification from ZMQ
+        if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+            println!("Received message: {}", text);
+            assert!(text.contains("RESULT") && text.contains(&target_address_str));
+        } else {
+            assert!(false);
+        }
 
-    //     ws_sender
-    //         .send(TungsteniteMessage::Text(subscribe_txid_message))
-    //         .await
-    //         .expect("Failed to send txid subscribe message");
+        // Subscribe to the transaction ID
+        let subscribe_txid_message = format!("SUBSCRIBE||54321|{}|{}", txid.len(), txid);
+        println!("Subscribe to txid message: {}", subscribe_txid_message);
 
-    //     // Wait for subscription confirmation
-    //     if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
-    //         println!("Txid subscribe response: {}", text);
-    //         // Should receive an ACK message
-    //         assert!(text.contains("ACK") || text.contains("RESULT"));
-    //     } else {
-    //         assert!(false);
-    //     }
+        ws_sender
+            .send(TungsteniteMessage::Text(subscribe_txid_message))
+            .await
+            .expect("Failed to send txid subscribe message");
 
-    //     // Generate a block to confirm the transaction
-    //     test_node.generate_to_address(1, &funding_address).unwrap();
-    //     println!("Generated block to confirm transaction");
+        // Wait for subscription confirmation
+        if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+            println!("Txid subscribe response: {}", text);
+            // Should receive an ACK message
+            assert!(text.contains("ACK") || text.contains("RESULT"));
+        } else {
+            assert!(false);
+        }
 
-    //     // Wait for the txid confirmation notification from ZMQ
-    //     let mut received_txid_notification = false;
+        // Generate a block to confirm the transaction
+        test_node.generate_to_address(1, &funding_address).unwrap();
+        println!("Generated block to confirm transaction");
 
-    //     for _ in 0..2 {
-    //         // We are receiving two messages, one for the txid and one for the address which is sending two because zmq rawtx is sent twice
-    //         if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
-    //             println!("Received txid confirmation message: {}", text);
+        // Wait for the txid confirmation notification from ZMQ
+        let mut received_txid_notification = false;
 
-    //             // Check if this is a RESULT message containing our txid
-    //             if text.contains("RESULT") && text.contains(&txid) {
-    //                 received_txid_notification = true;
-    //             }
-    //         }
-    //     }
-    //     assert!(received_txid_notification);
-    // }
+        for _ in 0..2 {
+            // We are receiving two messages, one for the txid and one for the address which is sending two because zmq rawtx is sent twice
+            if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+                println!("Received txid confirmation message: {}", text);
+
+                // Check if this is a RESULT message containing our txid
+                if text.contains("RESULT") && text.contains(&txid) {
+                    received_txid_notification = true;
+                }
+            }
+        }
+        assert!(received_txid_notification);
+    }
 }

@@ -5,48 +5,56 @@ use jsonrpc_lite::JsonRpc;
 use lwk_wollet::LiquidexProposal;
 use lwk_wollet::Unvalidated;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::fmt;
 
 use crate::Topic;
 
 #[derive(Debug)]
 pub struct NexusRequest {
-    pub id: i64,
+    pub id: u32,
     pub method: Method,
     pub params: Params,
 }
+#[derive(Debug)]
+pub struct NexusResponse {
+    id: Option<u32>,
+    val: Result<serde_json::Value, Error>,
+}
+
 impl NexusRequest {
+    pub fn new_address_subscribe(id: u32, address: &str) -> Self {
+        Self {
+            id,
+            method: Method::Subscribe,
+            params: Params::Address(address.to_string()),
+        }
+    }
     pub(crate) fn topic(&self) -> Result<Topic, Error> {
         topic_from_params(&self.params)
     }
 }
 
-#[derive(Debug)]
-pub struct NexusResponse {
-    id: Option<i64>,
-    val: Result<serde_json::Value, Error>,
-}
-
 impl NexusResponse {
-    pub fn new(id: i64, val: serde_json::Value) -> Self {
+    pub fn new(id: u32, val: serde_json::Value) -> Self {
         Self {
             id: Some(id),
             val: Ok(val),
         }
     }
-    pub fn new_subscribed(id: i64) -> Self {
+    pub fn new_subscribed(id: u32) -> Self {
         Self {
             id: Some(id),
             val: Ok(serde_json::Value::String("subscribed".to_string())),
         }
     }
-    pub fn new_pong(id: i64) -> Self {
+    pub fn new_pong(id: u32) -> Self {
         Self {
             id: Some(id),
             val: Ok(serde_json::Value::String("pong".to_string())),
         }
     }
-    pub fn error(id: i64, err: Error) -> Self {
+    pub fn error(id: u32, err: Error) -> Self {
         Self {
             id: Some(id),
             val: Err(err),
@@ -63,8 +71,8 @@ impl NexusResponse {
 impl From<NexusResponse> for JsonRpc {
     fn from(response: NexusResponse) -> Self {
         match (response.id, response.val) {
-            (Some(id), Ok(val)) => JsonRpc::success(id, &val),
-            (Some(id), Err(err)) => JsonRpc::error(id, err.into()),
+            (Some(id), Ok(val)) => JsonRpc::success(id as i64, &val),
+            (Some(id), Err(err)) => JsonRpc::error(id as i64, err.into()),
             (None, Ok(val)) => {
                 // Note JSON-RPC 2.0 does not properly support pub-sub notifications, because:
                 // * notifications are supposed to not carry a result
@@ -78,11 +86,12 @@ impl From<NexusResponse> for JsonRpc {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Params {
     Any(Any),
     Address(String),
     Tx(Tx),
-    ProposalPair(ProposalPair),
+    Pair(Pair),
     Wallet(Wallet),
     Empty,
     Proposal(Proposal),
@@ -147,6 +156,15 @@ impl TryFrom<JsonRpc> for NexusRequest {
     }
 }
 
+impl fmt::Display for NexusRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let method = self.method.to_string();
+        let params = serde_json::to_value(&self.params).unwrap();
+        let j = JsonRpc::request_with_params(self.id as i64, &method, params);
+        write!(f, "{}", serde_json::to_string(&j).unwrap())
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct TopicContent {
     pub topic: String,
@@ -177,7 +195,7 @@ pub struct Tx {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct ProposalPair {
+pub struct Pair {
     /// Asset id in input (the maker is selling this)
     pub input: String,
 
@@ -206,7 +224,7 @@ pub fn topic_from_params(params: &Params) -> Result<Topic, Error> {
         Params::Any(any) => Ok(Topic::Unvalidated(any.topic.clone())),
         Params::Address(address) => Ok(Topic::Validated(address.clone())),
         Params::Tx(tx) => Ok(Topic::Validated(tx.txid.clone())),
-        Params::ProposalPair(proposal) => Ok(Topic::Validated(proposal.input.clone())),
+        Params::Pair(proposal) => Ok(Topic::Validated(proposal.input.clone())),
         Params::Pset(pset) => Ok(Topic::Validated(pset.wallet_id.clone())),
         _ => Err(Error::InvalidParams),
     }
@@ -236,8 +254,8 @@ pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
                             Ok(Params::Tx(tx))
                         }
                         "pair" => {
-                            let proposal: ProposalPair = serde_json::from_value(value).unwrap();
-                            Ok(Params::ProposalPair(proposal))
+                            let proposal: Pair = serde_json::from_value(value).unwrap();
+                            Ok(Params::Pair(proposal))
                         }
                         "proposal" => {
                             let proposal: LiquidexProposal<Unvalidated> =
@@ -294,7 +312,7 @@ impl Params {
             (Params::Address(_), Method::Subscribe) => Ok(()),
             (Params::Tx(_), Method::Subscribe) => Ok(()),
             (Params::Wallet(_), Method::Subscribe) => Ok(()),
-            (Params::ProposalPair(_), Method::Subscribe) => Ok(()),
+            (Params::Pair(_), Method::Subscribe) => Ok(()),
             (Params::Proposal(_), Method::Publish) => Ok(()),
             (Params::Pset(_), Method::Publish) => Ok(()),
             (Params::Ping, Method::Publish) => Ok(()),
@@ -303,11 +321,11 @@ impl Params {
     }
 }
 
-pub fn parse_id(jsonrpc: &JsonRpc) -> Result<i64, Error> {
+pub fn parse_id(jsonrpc: &JsonRpc) -> Result<u32, Error> {
     let id = jsonrpc.get_id();
     if let Some(Id::Num(n)) = id {
-        if n > 0 {
-            return Ok(n);
+        if n > 0 && n < (u32::MAX as i64) {
+            return Ok(n as u32);
         }
     }
     Err(Error::InvalidId(id))
@@ -446,7 +464,7 @@ mod tests {
         assert_eq!(request.method, Method::Subscribe);
         assert_eq!(
             request.params,
-            Params::ProposalPair(ProposalPair {
+            Params::Pair(Pair {
                 input: "test".to_string(),
                 output: "best".to_string()
             })
