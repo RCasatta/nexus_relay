@@ -22,9 +22,9 @@ cargo run
 
 ## Protocol
 
-The server uses [JSON-RPC 2.0](https://www.jsonrpc.org/specification) with named parameters and unsigned numeric as id over WebSocket
+The server uses [JSON-RPC 2.0](https://www.jsonrpc.org/specification) with some restriction outlined below over WebSocket.
 
-## Methods
+### JSON-RPC Method
 
 There are the following methods:
 
@@ -32,12 +32,26 @@ There are the following methods:
 * `subscribe`
 * `unsubscribe`
 
+### JSON-RPC Id
+
+Id must be an positive integer (which is a restriction over JSON-RPC)
+
+The only exception are notifications sent from the server that use `-1`. Notification are message sent spontanously (for example when an event is triggered for an active subscription) from the server tha don't require a response.
+We do this because JSON-RPC [notifications](https://www.jsonrpc.org/specification#notification) don't hold a value.
+
+### JSON-RPC Params
+
+Params must be a Map with a single value, which is another restriction in comparison to JSON-RPC.
+This is done to discriminate the subcategory of the method.
+
+## Methods
+
 ### Ping/Pong
 
 Request:
 
 ```json
-{"jsonrpc": "2.0", "method": "subscribe", "id": 1, "params": "ping" }
+{"jsonrpc": "2.0", "method": "publish", "id": 1, "params": {"ping": null} }
 ```
 
 Response:
