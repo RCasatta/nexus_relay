@@ -7,17 +7,80 @@ use lwk_wollet::Unvalidated;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::message::Methods;
+use crate::Topic;
 
+#[derive(Debug)]
 pub struct NexusRequest {
-    pub method: Methods,
+    pub id: i64,
+    pub method: Method,
     pub params: Params,
+}
+impl NexusRequest {
+    pub(crate) fn topic(&self) -> Result<Topic, Error> {
+        topic_from_params(&self.params)
+    }
+}
+
+#[derive(Debug)]
+pub struct NexusResponse {
+    id: Option<i64>,
+    val: Result<serde_json::Value, Error>,
+}
+
+impl NexusResponse {
+    pub fn new(id: i64, val: serde_json::Value) -> Self {
+        Self {
+            id: Some(id),
+            val: Ok(val),
+        }
+    }
+    pub fn new_subscribed(id: i64) -> Self {
+        Self {
+            id: Some(id),
+            val: Ok(serde_json::Value::String("subscribed".to_string())),
+        }
+    }
+    pub fn new_pong(id: i64) -> Self {
+        Self {
+            id: Some(id),
+            val: Ok(serde_json::Value::String("pong".to_string())),
+        }
+    }
+    pub fn error(id: i64, err: Error) -> Self {
+        Self {
+            id: Some(id),
+            val: Err(err),
+        }
+    }
+    pub fn notification(val: serde_json::Value) -> Self {
+        Self {
+            id: None,
+            val: Ok(val),
+        }
+    }
+}
+
+impl From<NexusResponse> for JsonRpc {
+    fn from(response: NexusResponse) -> Self {
+        match (response.id, response.val) {
+            (Some(id), Ok(val)) => JsonRpc::success(id, &val),
+            (Some(id), Err(err)) => JsonRpc::error(id, err.into()),
+            (None, Ok(val)) => {
+                // Note JSON-RPC 2.0 does not properly support pub-sub notifications, because:
+                // * notifications are supposed to not carry a result
+                // * response are supposed to have an id
+                // In absence of a proper way we use a success response with a negative id
+                JsonRpc::success(-1, &val)
+            }
+            (None, Err(_)) => unreachable!(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Params {
     Any(Any),
-    Address(Address),
+    Address(String),
     Tx(Tx),
     ProposalPair(ProposalPair),
     Wallet(Wallet),
@@ -29,11 +92,38 @@ pub enum Params {
 
 #[derive(Debug)]
 pub enum Error {
+    InvalidId(Option<Id>),
     InvalidMethod,
     InvalidParams,
     InvalidParamsForThisMethod,
     ArrayParamsAreInvalid,
     ParamsMustContainASingleRootElement,
+}
+
+impl From<Error> for jsonrpc_lite::JsonRpc {
+    fn from(err: Error) -> Self {
+        jsonrpc_lite::JsonRpc::error(0, err.into())
+    }
+}
+
+impl From<Error> for jsonrpc_lite::Error {
+    fn from(err: Error) -> Self {
+        match err {
+            Error::InvalidId(id) => jsonrpc_lite::Error {
+                code: jsonrpc_lite::ErrorCode::InvalidRequest.code(),
+                message: format!("Invalid id, must be present, not a string and positive"),
+                data: Some(
+                    id.map(|id| serde_json::to_value(&id).unwrap())
+                        .unwrap_or(serde_json::Value::Null),
+                ),
+            },
+            Error::InvalidMethod => jsonrpc_lite::Error::method_not_found(),
+            Error::InvalidParams
+            | Error::InvalidParamsForThisMethod
+            | Error::ArrayParamsAreInvalid
+            | Error::ParamsMustContainASingleRootElement => jsonrpc_lite::Error::invalid_params(),
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -48,11 +138,12 @@ impl TryFrom<JsonRpc> for NexusRequest {
     type Error = Error;
 
     fn try_from(jsonrpc: JsonRpc) -> Result<Self, Self::Error> {
-        let method = parse_method(&jsonrpc).ok_or(Error::InvalidMethod)?;
+        let id = parse_id(&jsonrpc)?;
+        let method = parse_method(&jsonrpc)?;
         let params = parse_params(&jsonrpc)?;
         params.validate_for_method(&method)?;
 
-        Ok(NexusRequest { method, params })
+        Ok(NexusRequest { id, method, params })
     }
 }
 
@@ -110,6 +201,17 @@ pub struct Proposal {
     pub proposal: LiquidexProposal<Unvalidated>,
 }
 
+pub fn topic_from_params(params: &Params) -> Result<Topic, Error> {
+    match params {
+        Params::Any(any) => Ok(Topic::Unvalidated(any.topic.clone())),
+        Params::Address(address) => Ok(Topic::Validated(address.clone())),
+        Params::Tx(tx) => Ok(Topic::Validated(tx.txid.clone())),
+        Params::ProposalPair(proposal) => Ok(Topic::Validated(proposal.input.clone())),
+        Params::Pset(pset) => Ok(Topic::Validated(pset.wallet_id.clone())),
+        _ => Err(Error::InvalidParams),
+    }
+}
+
 pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
     match jsonrpc.get_params() {
         None => Ok(Params::Empty),
@@ -126,7 +228,7 @@ pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
                             Ok(Params::Any(any))
                         }
                         "address" => {
-                            let address: Address = serde_json::from_value(value).unwrap();
+                            let address: String = serde_json::from_value(value).unwrap();
                             Ok(Params::Address(address))
                         }
                         "tx" => {
@@ -161,26 +263,26 @@ pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
     }
 }
 
-pub fn parse_method(jsonrpc: &JsonRpc) -> Option<Methods> {
+pub fn parse_method(jsonrpc: &JsonRpc) -> Result<Method, Error> {
     match jsonrpc.get_method() {
-        Some(s) => Methods::from_str(s).ok(),
-        _ => None,
+        Some(s) => Method::from_str(s).map_err(|_| Error::InvalidMethod),
+        _ => Err(Error::InvalidMethod),
     }
 }
 
 impl Params {
-    pub fn validate_for_method(&self, method: &Methods) -> Result<(), Error> {
+    pub fn validate_for_method(&self, method: &Method) -> Result<(), Error> {
         println!("validate_for_method: {:?}, {:?}", self, method);
         match (self, method) {
             (Params::Any(any), e) => match e {
-                Methods::Subscribe => {
+                Method::Subscribe => {
                     if any.content.is_some() {
                         Err(Error::InvalidParams)
                     } else {
                         Ok(())
                     }
                 }
-                Methods::Publish => {
+                Method::Publish => {
                     if any.content.is_none() {
                         Err(Error::InvalidParams)
                     } else {
@@ -189,28 +291,61 @@ impl Params {
                 }
                 _ => Err(Error::InvalidParams),
             },
-            (Params::Address(_), Methods::Subscribe) => Ok(()),
-            (Params::Tx(_), Methods::Subscribe) => Ok(()),
-            (Params::Wallet(_), Methods::Subscribe) => Ok(()),
-            (Params::ProposalPair(_), Methods::Subscribe) => Ok(()),
-            (Params::Proposal(_), Methods::Publish) => Ok(()),
-            (Params::Pset(_), Methods::Publish) => Ok(()),
-            (Params::Ping, Methods::Publish) => Ok(()),
+            (Params::Address(_), Method::Subscribe) => Ok(()),
+            (Params::Tx(_), Method::Subscribe) => Ok(()),
+            (Params::Wallet(_), Method::Subscribe) => Ok(()),
+            (Params::ProposalPair(_), Method::Subscribe) => Ok(()),
+            (Params::Proposal(_), Method::Publish) => Ok(()),
+            (Params::Pset(_), Method::Publish) => Ok(()),
+            (Params::Ping, Method::Publish) => Ok(()),
             _ => Err(Error::InvalidParamsForThisMethod),
         }
     }
 }
 
-pub fn parse_id(id: Id) -> Option<i64> {
-    match id {
-        Id::Num(n) => Some(n),
-        _ => None,
+pub fn parse_id(jsonrpc: &JsonRpc) -> Result<i64, Error> {
+    let id = jsonrpc.get_id();
+    if let Some(Id::Num(n)) = id {
+        if n > 0 {
+            return Ok(n);
+        }
+    }
+    Err(Error::InvalidId(id))
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum Method {
+    Publish,
+    Subscribe,
+    Unsubscribe,
+}
+
+impl fmt::Display for Method {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Method::Publish => write!(f, "publish"),
+            Method::Subscribe => write!(f, "subscribe"),
+            Method::Unsubscribe => write!(f, "unsubscribe"),
+        }
+    }
+}
+
+impl FromStr for Method {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "publish" => Ok(Method::Publish),
+            "subscribe" => Ok(Method::Subscribe),
+            "unsubscribe" => Ok(Method::Unsubscribe),
+            _ => Err(Error::InvalidMethod),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use super::*;
 
@@ -230,8 +365,20 @@ mod tests {
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Publish);
+        assert_eq!(request.method, Method::Publish);
         assert_eq!(request.params, Params::Ping);
+    }
+
+    #[test]
+    fn test_nexus_response_ping() {
+        let jsonrpc = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "result": "pong"
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
+        let request = NexusResponse::new(10, Value::String("pong".to_string()));
+        assert_eq!(JsonRpc::from(request), jsonrpc);
     }
 
     #[test]
@@ -248,7 +395,7 @@ mod tests {
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(request.method, Method::Subscribe);
         assert_eq!(
             request.params,
             Params::Any(Any {
@@ -256,6 +403,29 @@ mod tests {
                 content: None
             })
         );
+    }
+
+    fn test_nexus_response_subscribe() {
+        let jsonrpc = json!({
+            "id": 10,
+            "jsonrpc": "2.0",
+            "result": "subscribed"
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
+        let request = NexusResponse::new(10, Value::String("subscribed".to_string()));
+        assert_eq!(JsonRpc::from(request), jsonrpc);
+
+        let address = json!({
+            "address": "test"
+        });
+        let jsonrpc = json!({
+            "id": -1,
+            "jsonrpc": "2.0",
+            "result": address
+        });
+        let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
+        let request = NexusResponse::notification(address);
+        assert_eq!(JsonRpc::from(request), jsonrpc);
     }
 
     #[test]
@@ -273,7 +443,7 @@ mod tests {
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(request.method, Method::Subscribe);
         assert_eq!(
             request.params,
             Params::ProposalPair(ProposalPair {
@@ -290,20 +460,13 @@ mod tests {
             "jsonrpc": "2.0",
             "method": "subscribe",
             "params": {
-                "address": {
-                    "address": "test"
-                }
+                "address": "test"
             }
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Subscribe);
-        assert_eq!(
-            request.params,
-            Params::Address(Address {
-                address: "test".to_string()
-            })
-        );
+        assert_eq!(request.method, Method::Subscribe);
+        assert_eq!(request.params, Params::Address("test".to_string()));
     }
 
     #[test]
@@ -320,7 +483,7 @@ mod tests {
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(request.method, Method::Subscribe);
         assert_eq!(
             request.params,
             Params::Tx(Tx {
@@ -343,7 +506,7 @@ mod tests {
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Subscribe);
+        assert_eq!(request.method, Method::Subscribe);
         assert_eq!(
             request.params,
             Params::Wallet(Wallet {
@@ -367,7 +530,7 @@ mod tests {
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Publish);
+        assert_eq!(request.method, Method::Publish);
         assert_eq!(
             request.params,
             Params::Any(Any {
@@ -391,7 +554,7 @@ mod tests {
 
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Publish);
+        assert_eq!(request.method, Method::Publish);
         assert_eq!(
             request.params,
             Params::Proposal(Proposal { proposal: proposal })
@@ -413,7 +576,7 @@ mod tests {
         });
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
-        assert_eq!(request.method, Methods::Publish);
+        assert_eq!(request.method, Method::Publish);
         assert_eq!(
             request.params,
             Params::Pset(Pset {
@@ -421,5 +584,20 @@ mod tests {
                 pset: "base64".to_string()
             })
         );
+    }
+
+    #[test]
+    fn test_message_type_roundtrip() {
+        // Test all variants of MessageType for roundtrip conversion
+        let types = vec![Method::Publish, Method::Subscribe, Method::Unsubscribe];
+
+        for msg_type in types {
+            // Convert MessageType to string
+            let type_str = msg_type.to_string();
+            // Parse string back to MessageType
+            let parsed_type = Method::from_str(&type_str).unwrap();
+            // Verify roundtrip conversion
+            assert_eq!(msg_type, parsed_type);
+        }
     }
 }

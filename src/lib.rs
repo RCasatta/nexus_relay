@@ -3,9 +3,7 @@ use elements::bitcoin::NetworkKind;
 use elements::AddressParams;
 use futures_util::{SinkExt, StreamExt};
 use jsonrpc_lite::JsonRpc;
-use message::{Error, Message, Methods};
 use node::Node;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -13,13 +11,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as TokioMessage;
 
-use crate::jsonrpc::{parse_id, parse_method};
+use crate::jsonrpc::{Error, Method, NexusRequest, NexusResponse, Params};
 
 pub mod jsonrpc;
-pub mod message;
 pub mod node;
 // pub mod proposal;
-// pub mod zmq;
+pub mod zmq;
 
 /// Configuration for Nexus Relay
 #[derive(Parser, Debug)]
@@ -111,7 +108,7 @@ impl TopicRegistry {
     }
 
     // Send a message to all subscribers of a topic
-    pub fn publish(&mut self, topic: Topic, message: Message) -> usize {
+    pub fn publish(&mut self, topic: Topic, message: String) -> usize {
         let subscribers = self.topics.entry(topic).or_default();
         let mut sent_count = 0;
 
@@ -176,19 +173,27 @@ pub async fn process_message(
     registry: Arc<Mutex<TopicRegistry>>,
     client: Option<&Node>,
     client_tx_clone: &mpsc::UnboundedSender<String>,
-) -> Result<JsonRpc, Box<dyn std::error::Error>> {
-    let method = parse_method(&message_request).ok_or(Error::NotImplemented)?;
-    let id = parse_id(message_request.get_id().ok_or(Error::InvalidId)?).ok_or(Error::InvalidId)?;
-    match method {
-        Methods::Subscribe => {
-            // TODO do other subscribe other than any
-            subscribe_to_topic(id, message_request, registry, client_tx_clone, false)
+) -> Result<NexusResponse, Error> {
+    log::debug!("Processing jsonrpc: {:?}", message_request);
+    let request = NexusRequest::try_from(message_request)?;
+    log::debug!("Processing message: {:?}", request);
+
+    let response = match request.method {
+        Method::Subscribe => {
+            let topic = request.topic()?;
+            subscribe_to_topic(request.id, topic, registry, client_tx_clone)?
         }
-        Methods::Publish => {
-            todo!()
-        }
-        _ => Err(Box::new(Error::NotImplemented)),
-    }
+        Method::Publish => match request.params {
+            Params::Ping => {
+                let response = NexusResponse::new_pong(request.id);
+                response
+            }
+            _ => return Err(Error::InvalidParams),
+        },
+        _ => return Err(Error::InvalidParams),
+    };
+    log::debug!("Response: {:?}", response);
+    Ok(response)
     //     MessageType::PublishAny => {
     //         process_publish_any(message_request, registry, message_request.random_id)
     //     }
@@ -223,31 +228,14 @@ pub async fn process_message(
 
 fn subscribe_to_topic(
     id: i64,
-    message_request: JsonRpc,
+    topic: Topic,
     registry: Arc<Mutex<TopicRegistry>>,
     client_tx: &mpsc::UnboundedSender<String>,
-    is_validated: bool,
-) -> Result<JsonRpc, Box<dyn std::error::Error>> {
-    let topic = "".to_string();
-    if topic.is_empty() {
-        return Err(Box::new(Error::MissingTopic));
-    }
-    if topic.len() > 64 {
-        return Err(Box::new(Error::InvalidTopic));
-    }
+) -> Result<NexusResponse, Error> {
+    let mut registry_guard = registry.lock().unwrap();
+    registry_guard.subscribe(topic, client_tx.clone());
 
-    // Lock the mutex only when needed and release it immediately
-    {
-        let mut registry_guard = registry.lock().unwrap();
-        let topic = if is_validated {
-            Topic::Validated(topic)
-        } else {
-            Topic::Unvalidated(topic)
-        };
-        registry_guard.subscribe(topic, client_tx.clone());
-    }
-
-    let message_response = JsonRpc::success(id, &Value::String("ACK".to_string()));
+    let message_response = NexusResponse::new_subscribed(id);
     Ok(message_response)
 }
 
@@ -308,7 +296,7 @@ pub async fn handle_connection(
             };
 
             // Process the message and get response
-            let response = match process_message(
+            let response: JsonRpc = match process_message(
                 raw_message,
                 registry_clone.clone(),
                 Some(&client_clone),
@@ -316,18 +304,13 @@ pub async fn handle_connection(
             )
             .await
             {
-                Ok(response) => serde_json::to_string(&response).unwrap(),
-                Err(e) => {
-                    let rpc_error =
-                        jsonrpc_lite::Error::new(jsonrpc_lite::ErrorCode::InternalError);
-                    let err = JsonRpc::error((), rpc_error);
-                    let err_str = serde_json::to_string(&err).unwrap();
-                    err_str
-                }
+                Ok(response) => response.into(),
+                Err(e) => e.into(),
             };
+            let response_str = serde_json::to_string(&response).unwrap();
 
             // Send response back to client
-            if client_tx_clone.send(response).is_err() {
+            if client_tx_clone.send(response_str).is_err() {
                 break;
             }
         }
@@ -347,7 +330,6 @@ pub async fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::message::{Message, Methods};
     use tokio::runtime::Runtime;
 
     fn proposal_str() -> &'static str {

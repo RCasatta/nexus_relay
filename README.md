@@ -37,7 +37,7 @@ There are the following methods:
 Request:
 
 ```json
-{"jsonrpc": "2.0", "method": "ping", "id": 1 }
+{"jsonrpc": "2.0", "method": "subscribe", "id": 1, "params": "ping" }
 ```
 
 Response:
