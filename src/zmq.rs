@@ -3,7 +3,7 @@ use elements::encode::Decodable;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     sync::{Arc, Mutex},
 };
 use tmq::{subscribe, Context, Multipart};
@@ -102,7 +102,7 @@ pub fn process_zmq_message(
     msg: Multipart,
     registry: &Arc<Mutex<TopicRegistry>>,
     network: &Network,
-    tx_seen: &mut HashSet<String>,
+    txs_seen: &mut BoundedSet<String>,
 ) -> Result<(), Error> {
     log::debug!("Processing ZMQ message");
     let mut iter = msg.iter().map(|item| item.as_ref());
@@ -112,9 +112,9 @@ pub fn process_zmq_message(
     if topic == b"rawtx" {
         let tx = elements::Transaction::consensus_decode(data)?;
         let txid = tx.txid().to_string();
-        if !tx_seen.contains(&txid) {
+        if !txs_seen.contains(&txid) {
             log::debug!("Processing ZMQ message with txid: {}", txid);
-            tx_seen.insert(txid.clone());
+            txs_seen.insert(txid.clone());
 
             // Publish TxSeen notification for mempool transactions
             publish_tx_seen(registry, txid, Where::Mempool);
@@ -147,9 +147,10 @@ pub async fn start_zmq_listener(
     registry: Arc<Mutex<TopicRegistry>>,
     endpoint: &str,
     network: Network,
+    tx_cache_size: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ctx = Context::new();
-    let mut tx_seen = HashSet::new();
+    let mut txs_seen = BoundedSet::new(tx_cache_size);
 
     // Create the subscriber socket correctly
     let socket_builder = subscribe(&ctx);
@@ -163,7 +164,7 @@ pub async fn start_zmq_listener(
     while let Some(msg) = socket.next().await {
         match msg {
             Ok(multipart) => {
-                if let Err(e) = process_zmq_message(multipart, &registry, &network, &mut tx_seen) {
+                if let Err(e) = process_zmq_message(multipart, &registry, &network, &mut txs_seen) {
                     log::error!("Error processing ZMQ message: {}", e);
                 }
             }
@@ -174,6 +175,51 @@ pub async fn start_zmq_listener(
     }
 
     Ok(())
+}
+
+/// A bounded set that automatically removes the oldest entry when capacity is exceeded.
+///
+/// This data structure maintains insertion order and provides O(1) contains() checks
+/// while keeping memory usage bounded.
+pub struct BoundedSet<T> {
+    set: HashSet<T>,
+    queue: VecDeque<T>,
+    capacity: usize,
+}
+
+impl<T> BoundedSet<T>
+where
+    T: Clone + std::hash::Hash + Eq,
+{
+    fn new(capacity: usize) -> Self {
+        Self {
+            set: HashSet::new(),
+            queue: VecDeque::new(),
+            capacity,
+        }
+    }
+
+    fn contains(&self, item: &T) -> bool {
+        self.set.contains(item)
+    }
+
+    fn insert(&mut self, item: T) -> bool {
+        if self.set.contains(&item) {
+            return false; // Item already exists
+        }
+
+        // If at capacity, remove the oldest item
+        if self.queue.len() >= self.capacity {
+            if let Some(oldest) = self.queue.pop_front() {
+                self.set.remove(&oldest);
+            }
+        }
+
+        // Add the new item
+        self.set.insert(item.clone());
+        self.queue.push_back(item);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -232,7 +278,7 @@ mod tests {
             registry_guard.subscribe(Topic::Validated(address.to_string()), tx_sender);
         }
 
-        let mut tx_seen = HashSet::new();
+        let mut tx_seen = BoundedSet::new(100);
         // Process the message
         let result = process_zmq_message(
             multipart,

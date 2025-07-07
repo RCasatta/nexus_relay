@@ -149,7 +149,7 @@ pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>
     let network_clone = config.network;
     tokio::spawn(async move {
         if let Err(e) =
-            zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone, network_clone).await
+            zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone, network_clone, 1000).await
         {
             log::error!("Error in ZMQ listener: {}", e);
         }
