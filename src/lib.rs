@@ -186,7 +186,7 @@ pub async fn process_message(
             subscribe_to_topic(request.id, topic, registry, client_tx_clone)?
         }
         Method::Publish => match request.params {
-            Params::Ping => NexusResponse::new_pong(request.id),
+            Params::Ping(()) => NexusResponse::new_pong(request.id),
             Params::Proposal(proposal) => {
                 proposal::process_publish_proposal(proposal, registry, client, request.id).await?
             }
@@ -374,7 +374,7 @@ mod tests {
         let message = NexusRequest::new_ping(12341234);
         assert_eq!(
             message.to_string(),
-            "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"ping\":null}}"
+            "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"ping\":null},\"id\":12341234}"
         );
         let raw_message = JsonRpc::parse(&message.to_string()).unwrap();
         let registry = Arc::new(Mutex::new(TopicRegistry::new()));
@@ -386,7 +386,10 @@ mod tests {
             .unwrap();
 
         // Verify response
-        assert_eq!(response.to_string(), "PONG||||");
+        assert_eq!(
+            response.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"result\":\"pong\",\"id\":12341234}"
+        );
     }
 
     // #[test]

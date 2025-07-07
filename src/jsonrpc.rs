@@ -34,7 +34,7 @@ impl NexusRequest {
         Self {
             id,
             method: Method::Publish,
-            params: Params::Ping,
+            params: Params::Ping(()),
         }
     }
     pub fn new_txid_subscribe(id: u32, txid: &str) -> Self {
@@ -132,7 +132,7 @@ pub enum Params {
     Empty,
     Proposal(Proposal),
     Pset(Pset),
-    Ping,
+    Ping(()),
 }
 
 #[derive(Debug)]
@@ -252,6 +252,11 @@ pub struct Pair {
     /// Asset id in output (the maker is buying this)
     pub output: String,
 }
+impl Pair {
+    fn topic(&self) -> Topic {
+        Topic::Validated(format!("{}:{}", self.input, self.output))
+    }
+}
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Wallet {
@@ -274,7 +279,7 @@ pub fn topic_from_params(params: &Params) -> Result<Topic, Error> {
         Params::Any(any) => Ok(Topic::Unvalidated(any.topic.clone())),
         Params::Address(address) => Ok(Topic::Validated(address.clone())),
         Params::Tx(tx) => Ok(Topic::Validated(tx.txid.clone())),
-        Params::Pair(proposal) => Ok(Topic::Validated(proposal.input.clone())),
+        Params::Pair(pair) => Ok(pair.topic()),
         Params::Pset(pset) => Ok(Topic::Validated(pset.wallet_id.clone())),
         _ => Err(Error::InvalidParams),
     }
@@ -320,7 +325,7 @@ pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
                             let pset: Pset = serde_json::from_value(value).unwrap();
                             Ok(Params::Pset(pset))
                         }
-                        "ping" => Ok(Params::Ping),
+                        "ping" => Ok(Params::Ping(())),
                         _ => Err(Error::InvalidParams),
                     },
                     None => Ok(Params::Empty),
@@ -365,7 +370,7 @@ impl Params {
             (Params::Pair(_), Method::Subscribe) => Ok(()),
             (Params::Proposal(_), Method::Publish) => Ok(()),
             (Params::Pset(_), Method::Publish) => Ok(()),
-            (Params::Ping, Method::Publish) => Ok(()),
+            (Params::Ping(()), Method::Publish) => Ok(()),
             _ => Err(Error::InvalidParamsForThisMethod),
         }
     }
@@ -447,7 +452,7 @@ mod tests {
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
         assert_eq!(request.method, Method::Publish);
-        assert_eq!(request.params, Params::Ping);
+        assert_eq!(request.params, Params::Ping(()));
         assert_eq!(
             request.to_string(),
             "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"ping\":null},\"id\":10}"
