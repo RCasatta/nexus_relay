@@ -8,4 +8,7 @@ pub enum Error {
 
     #[error("elements error: {0}")]
     Elements(#[from] elements::encode::Error),
+
+    #[error("liquidex error: {0}")]
+    Liquidex(#[from] lwk_wollet::Error),
 }

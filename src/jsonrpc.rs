@@ -4,6 +4,7 @@ use jsonrpc_lite::Id;
 use jsonrpc_lite::JsonRpc;
 use lwk_wollet::LiquidexProposal;
 use lwk_wollet::Unvalidated;
+use lwk_wollet::Validated;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -38,6 +39,13 @@ impl NexusRequest {
             }),
         }
     }
+    pub fn new_publish_proposal(id: u32, proposal: Proposal) -> Self {
+        Self {
+            id,
+            method: Method::Publish,
+            params: Params::Proposal(proposal),
+        }
+    }
     pub(crate) fn topic(&self) -> Result<Topic, Error> {
         topic_from_params(&self.params)
     }
@@ -54,6 +62,13 @@ impl NexusResponse {
         Self {
             id: Some(id as i64),
             val: Ok(serde_json::Value::String("subscribed".to_string())),
+        }
+    }
+
+    pub fn new_published(id: u32) -> Self {
+        Self {
+            id: Some(id as i64),
+            val: Ok(serde_json::Value::String("published".to_string())),
         }
     }
     pub fn new_pong(id: u32) -> Self {
@@ -393,6 +408,12 @@ impl fmt::Display for NexusResponse {
         let jsonrpc = JsonRpc::from(self);
         write!(f, "{}", serde_json::to_string(&jsonrpc).unwrap())
     }
+}
+
+pub fn topic_from_proposal(proposal: &LiquidexProposal<Validated>) -> Result<Topic, Error> {
+    let inp = proposal.input().asset;
+    let out = proposal.output().asset;
+    Ok(Topic::Validated(format!("{}:{}", inp, out)))
 }
 
 #[cfg(test)]

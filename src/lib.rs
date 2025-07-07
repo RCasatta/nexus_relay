@@ -11,12 +11,13 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message as TokioMessage;
 
-use crate::jsonrpc::{Error, Method, NexusRequest, NexusResponse, Params};
+use crate::error::Error;
+use crate::jsonrpc::{Method, NexusRequest, NexusResponse, Params};
 
+pub mod error;
 pub mod jsonrpc;
 pub mod node;
-// pub mod proposal;
-pub mod error;
+pub mod proposal;
 pub mod zmq;
 
 /// Configuration for Nexus Relay
@@ -84,7 +85,7 @@ pub struct TopicRegistry {
     topics: HashMap<Topic, Vec<mpsc::UnboundedSender<String>>>,
 }
 
-#[derive(Eq, PartialEq, Hash, Debug)]
+#[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub enum Topic {
     Validated(String),
     Unvalidated(String),
@@ -185,13 +186,13 @@ pub async fn process_message(
             subscribe_to_topic(request.id, topic, registry, client_tx_clone)?
         }
         Method::Publish => match request.params {
-            Params::Ping => {
-                let response = NexusResponse::new_pong(request.id);
-                response
+            Params::Ping => NexusResponse::new_pong(request.id),
+            Params::Proposal(proposal) => {
+                proposal::process_publish_proposal(proposal, registry, client, request.id).await?
             }
-            _ => return Err(Error::InvalidParams),
+            _ => return Err(Error::JsonRpc(jsonrpc::Error::InvalidParams)),
         },
-        _ => return Err(Error::InvalidParams),
+        _ => return Err(Error::JsonRpc(jsonrpc::Error::InvalidParams)),
     };
     log::debug!("Response: {:?}", response);
     Ok(response)
@@ -306,7 +307,13 @@ pub async fn handle_connection(
             .await
             {
                 Ok(response) => response.into(),
-                Err(e) => e.into(),
+                Err(e) => match e {
+                    Error::JsonRpc(e) => e.into(),
+                    _ => jsonrpc_lite::JsonRpc::error(
+                        0,
+                        jsonrpc_lite::Error::new(jsonrpc_lite::ErrorCode::ParseError), // TODO
+                    ),
+                },
             };
             let response_str = serde_json::to_string(&response).unwrap();
 

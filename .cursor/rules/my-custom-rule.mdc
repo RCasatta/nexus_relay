@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+
+# My coding preferences
+
+- When adding code such as new struct in a file, add those at the end of the file, or if there is the test section just before that.
+- Never add a new dependencies if not explicity asked
