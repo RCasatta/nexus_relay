@@ -224,7 +224,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::jsonrpc::Method;
 
     use super::*;
     use elements::hashes::{hash160, Hash};

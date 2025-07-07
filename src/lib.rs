@@ -340,10 +340,6 @@ mod tests {
     use super::*;
     use tokio::runtime::Runtime;
 
-    fn proposal_str() -> &'static str {
-        include_str!("../test_data/proposal.json")
-    }
-
     // async fn process_message_test<'a>(
     //     message_request: &'a Message<'a>,
     //     registry: Arc<Mutex<TopicRegistry>>,
@@ -392,27 +388,39 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn test_process_message_subscribe() {
-    //     // Create a runtime
-    //     let rt = Runtime::new().unwrap();
+    #[test]
+    fn test_process_message_subscribe() {
+        // Create a runtime
+        let rt = Runtime::new().unwrap();
 
-    //     // Create test message with a topic
-    //     let message_str = "SUBSCRIBE||1|6|topic1";
-    //     let raw_message = Message::parse(message_str).unwrap();
-    //     let registry = Arc::new(Mutex::new(TopicRegistry::new()));
-    //     let (client_tx, _client_rx) = mpsc::unbounded_channel();
+        // Create test message with a topic using the new JSON-RPC format
+        let message_json = r#"{
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": "subscribe",
+            "params": {
+                "any": {
+                    "topic": "topic1"
+                }
+            }
+        }"#;
+        let raw_message = JsonRpc::parse(message_json).unwrap();
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+        let (client_tx, _client_rx) = mpsc::unbounded_channel();
 
-    //     // Process the message
-    //     let response = rt
-    //         .block_on(process_message(&raw_message, registry, None, &client_tx))
-    //         .unwrap();
+        // Process the message
+        let response = rt
+            .block_on(process_message(raw_message, registry, None, &client_tx))
+            .unwrap();
 
-    //     // Verify response
-    //     assert_eq!(response.to_string(), "ACK||1||");
+        // Verify response - should be subscribed confirmation in JSON-RPC format
+        assert_eq!(
+            response.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"result\":\"subscribed\",\"id\":1}"
+        );
 
-    //     // TODO verify the send to subscribers
-    // }
+        // TODO verify the send to subscribers
+    }
 
     // #[test]
     // fn test_process_message_subscribe_empty_topic() {

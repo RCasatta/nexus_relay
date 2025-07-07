@@ -1,11 +1,9 @@
-use lwk_wollet::elements::AssetId;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use crate::error::Error;
-use crate::jsonrpc::{topic_from_proposal, NexusRequest, NexusResponse, Proposal};
+use crate::jsonrpc::{topic_from_proposal, NexusResponse, Proposal};
 use crate::node::Node;
-use crate::{Topic, TopicRegistry};
+use crate::TopicRegistry;
 
 /// Process a publish proposal message
 pub async fn process_publish_proposal(
@@ -65,6 +63,8 @@ pub async fn process_publish_proposal(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use lwk_wollet::LiquidexProposal;
     use tokio::runtime::Runtime;
