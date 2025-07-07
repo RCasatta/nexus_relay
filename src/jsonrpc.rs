@@ -30,6 +30,13 @@ impl NexusRequest {
             params: Params::Address(address.to_string()),
         }
     }
+    pub fn new_ping(id: u32) -> Self {
+        Self {
+            id,
+            method: Method::Publish,
+            params: Params::Ping,
+        }
+    }
     pub fn new_txid_subscribe(id: u32, txid: &str) -> Self {
         Self {
             id,
@@ -218,6 +225,7 @@ pub struct Any {
     pub topic: String,
 
     /// It's absent for subscribe, present for publish
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
 }
 
@@ -440,6 +448,10 @@ mod tests {
         let request = NexusRequest::try_from(jsonrpc).unwrap();
         assert_eq!(request.method, Method::Publish);
         assert_eq!(request.params, Params::Ping);
+        assert_eq!(
+            request.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"ping\":null},\"id\":10}"
+        );
     }
 
     #[test]
@@ -476,8 +488,13 @@ mod tests {
                 content: None
             })
         );
+        assert_eq!(
+            request.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"method\":\"subscribe\",\"params\":{\"any\":{\"topic\":\"test\"}},\"id\":10}"
+        );
     }
 
+    #[test]
     fn test_nexus_response_subscribe() {
         let jsonrpc = json!({
             "id": 10,

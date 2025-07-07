@@ -365,25 +365,29 @@ mod tests {
     //     // TODO refactor out a fn process_str_message() which takes a string and returns a Message so that this is unit testable
     // }
 
-    // #[test]
-    // fn test_process_message_ping() {
-    //     // Create a runtime
-    //     let rt = Runtime::new().unwrap();
+    #[test]
+    fn test_process_message_ping() {
+        // Create a runtime
+        let rt = Runtime::new().unwrap();
 
-    //     // Create test message and registry
-    //     let message_str = "PING||||";
-    //     let raw_message = Message::parse(message_str).unwrap();
-    //     let registry = Arc::new(Mutex::new(TopicRegistry::new()));
-    //     let (client_tx, _client_rx) = mpsc::unbounded_channel();
+        // Create test message and registry
+        let message = NexusRequest::new_ping(12341234);
+        assert_eq!(
+            message.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"method\":\"publish\",\"params\":{\"ping\":null}}"
+        );
+        let raw_message = JsonRpc::parse(&message.to_string()).unwrap();
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+        let (client_tx, _client_rx) = mpsc::unbounded_channel();
 
-    //     // Process the message
-    //     let response = rt
-    //         .block_on(process_message(&raw_message, registry, None, &client_tx))
-    //         .unwrap();
+        // Process the message
+        let response = rt
+            .block_on(process_message(raw_message, registry, None, &client_tx))
+            .unwrap();
 
-    //     // Verify response
-    //     assert_eq!(response.to_string(), "PONG||||");
-    // }
+        // Verify response
+        assert_eq!(response.to_string(), "PONG||||");
+    }
 
     // #[test]
     // fn test_process_message_subscribe() {

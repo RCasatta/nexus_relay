@@ -73,10 +73,6 @@ mod tests {
         include_str!("../test_data/proposal.json")
     }
 
-    fn proposal_json() -> serde_json::Value {
-        serde_json::from_str(proposal_str()).unwrap()
-    }
-
     fn proposal() -> Proposal {
         Proposal {
             proposal: LiquidexProposal::from_str(proposal_str()).unwrap(),
