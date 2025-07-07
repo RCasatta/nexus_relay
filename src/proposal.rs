@@ -26,7 +26,7 @@ pub async fn process_publish_proposal(
         proposal.insecure_validate()?
     };
     let topic = topic_from_proposal(&proposal)?;
-    let message_to_subscriber = proposal.to_string();
+    let message_to_subscriber = NexusResponse::new_proposal(proposal).to_string();
 
     // Lock the mutex only when needed and release it immediately
     let sent_count = {

@@ -190,42 +190,28 @@ pub async fn process_message(
             Params::Proposal(proposal) => {
                 proposal::process_publish_proposal(proposal, registry, client, request.id).await?
             }
+            Params::Any(any) => {
+                // Handle publishing arbitrary content to topics
+                let topic = Topic::Unvalidated(any.topic);
+                let content = any
+                    .content
+                    .ok_or(Error::JsonRpc(jsonrpc::Error::InvalidParams))?;
+
+                let sent_count = {
+                    let mut registry_guard = registry.lock().unwrap();
+                    let response = NexusResponse::notification(serde_json::Value::String(content));
+                    registry_guard.publish(topic, response.to_string())
+                };
+
+                log::debug!("Published to {} subscribers", sent_count);
+                NexusResponse::new_published(request.id)
+            }
             _ => return Err(Error::JsonRpc(jsonrpc::Error::InvalidParams)),
         },
         _ => return Err(Error::JsonRpc(jsonrpc::Error::InvalidParams)),
     };
     log::debug!("Response: {:?}", response);
     Ok(response)
-    //     MessageType::PublishAny => {
-    //         process_publish_any(message_request, registry, message_request.random_id)
-    //     }
-    //     MessageType::PublishProposal => {
-    //         proposal::process_publish_proposal(
-    //             message_request,
-    //             registry,
-    //             client,
-    //             message_request.random_id,
-    //         )
-    //         .await
-    //     }
-    //     MessageType::Subscribe => {
-    //         subscribe_to_topic(message_request, registry, client_tx_clone, true)
-    //     }
-    //     MessageType::SubscribeAny => {
-    //         subscribe_to_topic(message_request, registry, client_tx_clone, false)
-    //     }
-    //     MessageType::Result => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
-    //     MessageType::Error => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
-    //     MessageType::Ping => {
-    //         let message_response = Message::new(MessageType::Pong, message_request.random_id, "");
-    //         Ok(message_response)
-    //     }
-    //     MessageType::Pong => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
-    //     MessageType::PublishPset => Err(Box::new(Error::NotImplemented)),
-    //     MessageType::Publish => Err(Box::new(Error::NotImplemented)),
-
-    //     MessageType::Ack => Err(Box::new(Error::ResponseMessageUsedAsRequest)),
-    // }
 }
 
 fn subscribe_to_topic(
@@ -338,7 +324,12 @@ pub async fn handle_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonrpc_lite::Id;
     use tokio::runtime::Runtime;
+
+    fn proposal_str() -> &'static str {
+        include_str!("../test_data/proposal.json")
+    }
 
     // async fn process_message_test<'a>(
     //     message_request: &'a Message<'a>,
@@ -454,178 +445,235 @@ mod tests {
         }
     }
 
-    // #[test]
-    // fn test_process_message_subscribe_empty_topic() {
-    //     // Create a runtime
-    //     let rt = Runtime::new().unwrap();
+    #[tokio::test]
+    async fn test_subscribe_publish() {
+        env_logger::init();
 
-    //     // Create test message with empty topic
-    //     let message_str = "SUBSCRIBE||1|0|";
-    //     let raw_message = Message::parse(message_str).unwrap();
-    //     let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+        // Create registry
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
 
-    //     // Process the message
-    //     let err = rt.block_on(process_message_test(&raw_message, registry));
+        // Create channels for all clients
+        let (client_subscribe_tx, mut client_subscribe_rx) = mpsc::unbounded_channel();
+        let (client_subscribe_any_tx, mut client_subscribe_any_rx) = mpsc::unbounded_channel();
+        let (client_publish_proposal_tx, _) = mpsc::unbounded_channel();
+        let (client_publish_any_tx, _) = mpsc::unbounded_channel();
 
-    //     // Verify response
-    //     assert_eq!(err, "ERROR||1|13|Missing topic");
-    // }
+        // Step 1: Set up subscriptions first
 
-    // #[tokio::test]
-    // async fn test_subscribe_publish() {
-    //     env_logger::init();
+        // Get the topic from a test proposal
+        // Use a simple mock proposal instead of the complex one to test parsing
+        let proposal_json = proposal_str();
+        let proposal: lwk_wollet::LiquidexProposal<lwk_wollet::Unvalidated> =
+            std::str::FromStr::from_str(proposal_json).unwrap();
+        let validated = proposal.insecure_validate().unwrap();
+        let topic = crate::jsonrpc::topic_from_proposal(&validated).unwrap();
+        let topic_str = match &topic {
+            Topic::Validated(s) => s.clone(),
+            Topic::Unvalidated(s) => s.clone(),
+        };
 
-    //     let id1 = 0;
-    //     let id2 = 1;
-    //     let id3 = 2;
-    //     let id4 = 3;
+        // SUBSCRIBE client: Subscribe to the validated topic using "pair" subscription
+        // This will create a validated topic subscription
+        let subscribe_message = format!(
+            r#"{{
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": "subscribe",
+            "params": {{
+                "pair": {{
+                    "input": "{}",
+                    "output": "{}"
+                }}
+            }}
+        }}"#,
+            validated.input().asset,
+            validated.output().asset
+        );
 
-    //     let proposal_json = proposal_str();
-    //     let message_publish = format!(
-    //         "PUBLISH_PROPOSAL||{id1}|{}|{}",
-    //         proposal_json.len(),
-    //         proposal_json
-    //     );
-    //     let message_publish = Message::parse(&message_publish).unwrap();
+        let raw_message = JsonRpc::parse(&subscribe_message).unwrap();
+        let message_response =
+            process_message(raw_message, registry.clone(), None, &client_subscribe_tx)
+                .await
+                .unwrap();
+        assert_eq!(
+            message_response.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"result\":\"subscribed\",\"id\":1}"
+        );
 
-    //     // Get the proposal topic
-    //     let proposal = message_publish.proposal().unwrap();
-    //     let validated = proposal.insecure_validate().unwrap();
-    //     let topic = proposal_topic(&validated).unwrap();
+        // SUBSCRIBE_ANY client: Subscribe to the same topic with "any" (unvalidated)
+        let subscribe_any_message = format!(
+            r#"{{
+            "id": 2,
+            "jsonrpc": "2.0",
+            "method": "subscribe",
+            "params": {{
+                "any": {{
+                    "topic": "{}"
+                }}
+            }}
+        }}"#,
+            topic_str
+        );
 
-    //     // Create registry
-    //     let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+        let raw_message = JsonRpc::parse(&subscribe_any_message).unwrap();
+        let message_response = process_message(
+            raw_message,
+            registry.clone(),
+            None,
+            &client_subscribe_any_tx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            message_response.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"result\":\"subscribed\",\"id\":2}"
+        );
 
-    //     // Create channels for all clients
-    //     let (client_subscribe_tx, mut client_subscribe_rx) = mpsc::unbounded_channel();
-    //     let (client_subscribe_any_tx, mut client_subscribe_any_rx) = mpsc::unbounded_channel();
-    //     let (client_publish_proposal_tx, _) = mpsc::unbounded_channel();
-    //     let (client_publish_any_tx, _) = mpsc::unbounded_channel();
+        // Step 2: Test proposal publishing
 
-    //     // Step 1: Set up subscriptions first
+        // Parse the proposal as a JSON value first
+        let proposal_value: serde_json::Value = serde_json::from_str(proposal_json).unwrap();
 
-    //     // SUBSCRIBE client: Subscribe to the validated topic
-    //     let message_str = format!("SUBSCRIBE||{id2}|129|{topic}");
-    //     let message = Message::parse(&message_str).unwrap();
+        // Create the JSON-RPC message properly
+        let publish_proposal_json = serde_json::json!({
+            "id": 3,
+            "jsonrpc": "2.0",
+            "method": "publish",
+            "params": {
+                "proposal": proposal_value
+            }
+        });
+        let s = publish_proposal_json.to_string();
+        println!("publish_proposal_json: {s}",);
+        let raw_message = JsonRpc::parse(&s).unwrap();
+        let message_response = process_message(
+            raw_message,
+            registry.clone(),
+            None,
+            &client_publish_proposal_tx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            message_response.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"result\":\"published\",\"id\":3}"
+        );
 
-    //     let message_response =
-    //         process_message(&message, registry.clone(), None, &client_subscribe_tx)
-    //             .await
-    //             .unwrap();
-    //     assert_eq!(message_response.to_string(), format!("ACK||{id2}||"));
+        // SUBSCRIBE client should receive the proposal
+        let message_received = client_subscribe_rx.recv().await.unwrap();
+        println!("message_received: {message_received}");
 
-    //     // SUBSCRIBE_ANY client: Subscribe to the same topic with SUBSCRIBE_ANY (unvalidated)
-    //     let message_str = format!("SUBSCRIBE_ANY||{id3}|129|{topic}");
-    //     let message = Message::parse(&message_str).unwrap();
+        // Parse the received message as JsonRpc to check it's a notification
+        let parsed_notification: JsonRpc = serde_json::from_str(&message_received).unwrap();
+        // Notifications have id = -1
+        match parsed_notification.get_id() {
+            Some(Id::Num(-1)) => {} // This is what we expect for notifications
+            other => panic!("Expected notification with id = -1, got: {:?}", other),
+        }
 
-    //     let message_response =
-    //         process_message(&message, registry.clone(), None, &client_subscribe_any_tx)
-    //             .await
-    //             .unwrap();
-    //     assert_eq!(message_response.to_string(), format!("ACK||{id3}||"));
+        // Extract the result and verify it's the proposal
+        if let Some(result) = parsed_notification.get_result() {
+            let result_str = result.to_string();
+            // Parse both strings to ensure we compare JSON content, not formatting
+            let json1: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+            let json2: serde_json::Value = serde_json::from_str(proposal_json).unwrap();
+            assert_eq!(json1, json2);
+        } else {
+            panic!("Expected notification with result");
+        }
 
-    //     // Step 2: Test proposal publishing
+        // SUBSCRIBE_ANY client should NOT receive the proposal (different topic types)
+        assert!(
+            client_subscribe_any_rx.try_recv().is_err(),
+            "SUBSCRIBE_ANY client incorrectly received the proposal"
+        );
 
-    //     // Publish the proposal
-    //     let message_response = process_message(
-    //         &message_publish,
-    //         registry.clone(),
-    //         None,
-    //         &client_publish_proposal_tx,
-    //     )
-    //     .await
-    //     .unwrap();
-    //     assert_eq!(message_response.to_string(), format!("ACK||{id1}||"));
+        // Step 3: Test publishing arbitrary content
 
-    //     // SUBSCRIBE client should receive the proposal
-    //     let message_received = client_subscribe_rx.recv().await.unwrap();
+        // Publish a message with "any" content
+        let content = "Hello World";
+        let publish_any_message = format!(
+            r#"{{
+            "id": 4,
+            "jsonrpc": "2.0",
+            "method": "publish",
+            "params": {{
+                "any": {{
+                    "topic": "{}",
+                    "content": "{}"
+                }}
+            }}
+        }}"#,
+            topic_str, content
+        );
 
-    //     let parsed_message = Message::parse(&message_received).unwrap();
-    //     assert_eq!(parsed_message.type_, MessageType::Result);
+        let raw_message = JsonRpc::parse(&publish_any_message).unwrap();
+        let message_response = process_message(raw_message, registry, None, &client_publish_any_tx)
+            .await
+            .unwrap();
+        assert_eq!(
+            message_response.to_string(),
+            "{\"jsonrpc\":\"2.0\",\"result\":\"published\",\"id\":4}"
+        );
 
-    //     // Parse both strings to ensure we compare JSON content, not formatting
-    //     let json1: serde_json::Value = serde_json::from_str(parsed_message.content()).unwrap();
-    //     let json2: serde_json::Value = serde_json::from_str(proposal_str()).unwrap();
-    //     assert_eq!(json1, json2);
+        // SUBSCRIBE client should NOT receive the ANY message (different topic types)
+        assert!(
+            client_subscribe_rx.try_recv().is_err(),
+            "SUBSCRIBE client incorrectly received the ANY message"
+        );
 
-    //     // SUBSCRIBE_ANY client should NOT receive the proposal
-    //     assert!(
-    //         client_subscribe_any_rx.try_recv().is_err(),
-    //         "SUBSCRIBE_ANY client incorrectly received the proposal"
-    //     );
+        // SUBSCRIBE_ANY client should receive the ANY message
+        let message_received = client_subscribe_any_rx.recv().await.unwrap();
 
-    //     // Publish a message with PUBLISH_ANY
-    //     let content = "Hello";
-    //     let publish_content = format!("{}|{}", topic, content);
-    //     let message_str = format!(
-    //         "PUBLISH_ANY||{id4}|{}|{}",
-    //         publish_content.len(),
-    //         publish_content
-    //     );
-    //     let message = Message::parse(&message_str).unwrap();
+        // Parse the received message as JsonRpc to check it's a notification
+        let parsed_notification: JsonRpc = serde_json::from_str(&message_received).unwrap();
+        // Notifications have id = -1
+        match parsed_notification.get_id() {
+            Some(Id::Num(-1)) => {} // This is what we expect for notifications
+            other => panic!("Expected notification with id = -1, got: {:?}", other),
+        }
 
-    //     let message_response = process_message(&message, registry, None, &client_publish_any_tx)
-    //         .await
-    //         .unwrap();
-    //     assert_eq!(message_response.to_string(), format!("ACK||{id4}||"));
+        // Extract the result and verify it's our content
+        if let Some(result) = parsed_notification.get_result() {
+            let result_str = result.as_str().unwrap();
+            assert_eq!(result_str, content);
+        } else {
+            panic!("Expected notification with result");
+        }
+    }
 
-    //     // SUBSCRIBE client should NOT receive the PUBLISH_ANY message
-    //     assert!(
-    //         client_subscribe_rx.try_recv().is_err(),
-    //         "SUBSCRIBE client incorrectly received the PUBLISH_ANY message"
-    //     );
+    #[test]
+    fn test_jsonrpc_lite() {
+        let a = serde_json::json!({
+            "id": 3,
+            "jsonrpc": "2.0",
+            "method": "publish",
+            "params": {
+                "proposal": "ciao"
+            }
+        });
+        let _ = JsonRpc::parse(&a.to_string()).unwrap();
 
-    //     // SUBSCRIBE_ANY client should receive the PUBLISH_ANY message
-    //     let message_received = client_subscribe_any_rx.recv().await.unwrap();
+        let b = serde_json::json!({
+            "id": 3,
+            "jsonrpc": "2.0",
+            "method": "publish",
+            "params": {
+                "proposal": a
+            }
+        });
+        let _ = JsonRpc::parse(&b.to_string()).unwrap();
 
-    //     let parsed_message = Message::parse(&message_received).unwrap();
-    //     assert_eq!(parsed_message.type_, MessageType::Result);
-    //     assert_eq!(parsed_message.content(), content);
-    // }
+        let proposal_json = proposal_str();
+        let proposal_value: serde_json::Value = serde_json::from_str(proposal_json).unwrap();
+        let c = serde_json::json!({
+            "id": 3,
+            "jsonrpc": "2.0",
+            "method": "publish",
+            "params": {
+                "proposal": proposal_value
+            }
+        });
+        let _ = JsonRpc::parse(&c.to_string()).unwrap();
+    }
 }
-
-// Process a publish any message
-// fn process_publish_any(
-//     message_request: JsonRpc,
-//     registry: Arc<Mutex<TopicRegistry>>,
-//     random_id: Option<u64>,
-// ) -> Result<Message<'a>, Box<dyn std::error::Error>> {
-//     let (topic, content) = message_request.topic_content()?;
-
-//     // Log the raw topic and content to help debug
-//     log::debug!("PublishAny raw topic: '{}', content: '{}'", topic, content);
-
-//     let message_to_subscriber = Message::new(Methods::Result, None, content);
-
-//     // Lock the mutex only when needed and release it immediately
-//     let sent_count = {
-//         let mut registry_guard = registry.lock().unwrap();
-//         let unvalidated_topic = Topic::Unvalidated(topic.to_string());
-
-//         // Log the registered topics for comparison
-//         for (existing_topic, subscribers) in &registry_guard.topics {
-//             match existing_topic {
-//                 Topic::Unvalidated(t) => log::debug!(
-//                     "Found registered Unvalidated topic: '{}' with {} subscribers",
-//                     t,
-//                     subscribers.len()
-//                 ),
-//                 Topic::Validated(t) => log::debug!(
-//                     "Found registered Validated topic: '{}' with {} subscribers",
-//                     t,
-//                     subscribers.len()
-//                 ),
-//             }
-//         }
-
-//         registry_guard.publish(unvalidated_topic, message_to_subscriber)
-//     };
-
-//     log::info!(
-//         "Message sent to {} subscribers on topic: {}",
-//         sent_count,
-//         topic
-//     );
-//     let message_response = Message::ack(random_id);
-//     Ok(message_response)
-// }

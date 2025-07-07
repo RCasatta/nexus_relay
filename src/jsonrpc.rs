@@ -96,6 +96,10 @@ impl NexusResponse {
             val: Ok(val),
         }
     }
+    pub fn new_proposal(proposal: LiquidexProposal<Validated>) -> Self {
+        let val = serde_json::to_value(proposal).unwrap();
+        Self::notification(val)
+    }
 }
 
 impl From<NexusResponse> for JsonRpc {
