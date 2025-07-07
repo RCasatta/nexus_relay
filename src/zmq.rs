@@ -1,8 +1,53 @@
-use crate::{Network, Topic, TopicRegistry};
+use crate::{error::Error, jsonrpc::NexusResponse, Network, Topic, TopicRegistry};
 use elements::encode::Decodable;
 use futures_util::StreamExt;
-use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 use tmq::{subscribe, Context, Multipart};
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Where {
+    Mempool,
+    Block,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddressSeen {
+    address: String,
+
+    #[serde(rename = "where")]
+    where_: Where,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TxSeen {
+    txid: String,
+
+    #[serde(rename = "where")]
+    where_: Where,
+}
+
+/// Extract output addresses from a transaction.
+///
+/// Given a borrowed transaction and network, returns a vector of addresses
+/// as strings for all outputs that can be decoded to valid addresses.
+pub fn get_output_addresses(tx: &elements::Transaction, network: &Network) -> Vec<String> {
+    let mut addresses = Vec::new();
+
+    for out in &tx.output {
+        if let Some(addr) =
+            elements::Address::from_script(&out.script_pubkey, None, network.address_params())
+        {
+            addresses.push(addr.to_string());
+        }
+    }
+
+    addresses
+}
 
 /// Process a single ZMQ message.
 ///
@@ -11,7 +56,9 @@ pub fn process_zmq_message(
     msg: Multipart,
     registry: &Arc<Mutex<TopicRegistry>>,
     network: &Network,
-) -> Result<(), Box<dyn std::error::Error>> {
+    tx_seen: &mut HashSet<String>,
+) -> Result<(), Error> {
+    log::debug!("Processing ZMQ message");
     let mut iter = msg.iter().map(|item| item.as_ref());
     let topic = iter.next().unwrap();
     let data = iter.next().unwrap();
@@ -19,24 +66,22 @@ pub fn process_zmq_message(
     if topic == b"rawtx" {
         let tx = elements::Transaction::consensus_decode(data)?;
         let txid = tx.txid().to_string();
-
-        log::debug!("Processing ZMQ message with txid: {}", txid);
-
-        for out in tx.output {
-            if let Some(addr) =
-                elements::Address::from_script(&out.script_pubkey, None, network.address_params())
-            {
-                // Get the address as a string to use as the topic
-                let address_str = addr.to_string();
-
+        if !tx_seen.contains(&txid) {
+            log::debug!("Processing ZMQ message with txid: {}", txid);
+            tx_seen.insert(txid);
+            let addresses = get_output_addresses(&tx, network);
+            for address_str in addresses {
                 if let Ok(mut registry) = registry.lock() {
-                    // Create a message to publish
-                    // let message = Message::new(Methods::Result, None, &address_str);
-
                     log::debug!("Publishing message to address: {}", address_str);
                     // Publish using the address as the topic
                     let topic = Topic::Validated(address_str.to_string());
-                    let sent_count = registry.publish(topic, address_str.to_string());
+                    let address_seen = AddressSeen {
+                        address: address_str.to_string(),
+                        where_: Where::Mempool,
+                    };
+                    let address_seen = serde_json::to_value(&address_seen).unwrap();
+                    let response = NexusResponse::notification(address_seen);
+                    let sent_count = registry.publish(topic, response.to_string());
                     if sent_count > 0 {
                         log::info!("Sent {} messages to address: {}", sent_count, address_str);
                     }
@@ -51,9 +96,14 @@ pub fn process_zmq_message(
         let txids = block.txdata.iter().map(|tx| tx.txid().to_string());
         for txid in txids {
             if let Ok(mut registry) = registry.lock() {
-                // let message = Message::new(Methods::Result, None, &txid);
                 let topic = Topic::Validated(txid.clone());
-                let sent_count = registry.publish(topic, txid.to_string());
+                let tx_seen = TxSeen {
+                    txid: txid.clone(),
+                    where_: Where::Block,
+                };
+                let tx_seen = serde_json::to_value(&tx_seen).unwrap();
+                let response = NexusResponse::notification(tx_seen);
+                let sent_count = registry.publish(topic, response.to_string());
                 if sent_count > 0 {
                     log::info!("Sent {} messages to txid: {}", sent_count, txid);
                 }
@@ -69,6 +119,7 @@ pub async fn start_zmq_listener(
     network: Network,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ctx = Context::new();
+    let mut tx_seen = HashSet::new();
 
     // Create the subscriber socket correctly
     let socket_builder = subscribe(&ctx);
@@ -82,7 +133,7 @@ pub async fn start_zmq_listener(
     while let Some(msg) = socket.next().await {
         match msg {
             Ok(multipart) => {
-                if let Err(e) = process_zmq_message(multipart, &registry, &network) {
+                if let Err(e) = process_zmq_message(multipart, &registry, &network, &mut tx_seen) {
                     log::error!("Error processing ZMQ message: {}", e);
                 }
             }
@@ -102,6 +153,7 @@ mod tests {
     use super::*;
     use elements::hashes::{hash160, Hash};
     use elements::{encode::Encodable, Script};
+    use jsonrpc_lite::JsonRpc;
     use std::collections::VecDeque;
     use std::time::Duration;
     use tokio::sync::mpsc;
@@ -150,8 +202,14 @@ mod tests {
             registry_guard.subscribe(Topic::Validated(address.to_string()), tx_sender);
         }
 
+        let mut tx_seen = HashSet::new();
         // Process the message
-        let result = process_zmq_message(multipart, &registry, &Network::ElementsRegtest);
+        let result = process_zmq_message(
+            multipart,
+            &registry,
+            &Network::ElementsRegtest,
+            &mut tx_seen,
+        );
 
         // Verify the processing succeeded
         assert!(result.is_ok());
@@ -176,7 +234,11 @@ mod tests {
 
         // Parse the message and verify it contains the txid
         let message = received_message.unwrap();
-        assert_eq!(message, address);
+        let jsonrpc = JsonRpc::parse(&message).unwrap();
+        let tx_seen: AddressSeen =
+            serde_json::from_value(jsonrpc.get_result().unwrap().clone()).unwrap();
+        assert_eq!(tx_seen.address, address);
+        assert_eq!(tx_seen.where_, Where::Mempool);
         // let parsed = Message::parse(&message).unwrap();
         // assert_eq!(parsed.type_, Methods::Result);
         // assert_eq!(parsed.content(), address);

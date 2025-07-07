@@ -5,7 +5,6 @@ use jsonrpc_lite::JsonRpc;
 use lwk_wollet::LiquidexProposal;
 use lwk_wollet::Unvalidated;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::fmt;
 
 use crate::Topic;
@@ -18,7 +17,7 @@ pub struct NexusRequest {
 }
 #[derive(Debug)]
 pub struct NexusResponse {
-    id: Option<u32>,
+    id: Option<i64>,
     val: Result<serde_json::Value, Error>,
 }
 
@@ -30,6 +29,15 @@ impl NexusRequest {
             params: Params::Address(address.to_string()),
         }
     }
+    pub fn new_txid_subscribe(id: u32, txid: &str) -> Self {
+        Self {
+            id,
+            method: Method::Subscribe,
+            params: Params::Tx(Tx {
+                txid: txid.to_string(),
+            }),
+        }
+    }
     pub(crate) fn topic(&self) -> Result<Topic, Error> {
         topic_from_params(&self.params)
     }
@@ -38,31 +46,31 @@ impl NexusRequest {
 impl NexusResponse {
     pub fn new(id: u32, val: serde_json::Value) -> Self {
         Self {
-            id: Some(id),
+            id: Some(id as i64),
             val: Ok(val),
         }
     }
     pub fn new_subscribed(id: u32) -> Self {
         Self {
-            id: Some(id),
+            id: Some(id as i64),
             val: Ok(serde_json::Value::String("subscribed".to_string())),
         }
     }
     pub fn new_pong(id: u32) -> Self {
         Self {
-            id: Some(id),
+            id: Some(id as i64),
             val: Ok(serde_json::Value::String("pong".to_string())),
         }
     }
     pub fn error(id: u32, err: Error) -> Self {
         Self {
-            id: Some(id),
+            id: Some(id as i64),
             val: Err(err),
         }
     }
     pub fn notification(val: serde_json::Value) -> Self {
         Self {
-            id: None,
+            id: Some(-1),
             val: Ok(val),
         }
     }
@@ -70,8 +78,14 @@ impl NexusResponse {
 
 impl From<NexusResponse> for JsonRpc {
     fn from(response: NexusResponse) -> Self {
-        match (response.id, response.val) {
-            (Some(id), Ok(val)) => JsonRpc::success(id as i64, &val),
+        JsonRpc::from(&response)
+    }
+}
+
+impl From<&NexusResponse> for JsonRpc {
+    fn from(response: &NexusResponse) -> Self {
+        match (response.id, &response.val) {
+            (Some(id), Ok(val)) => JsonRpc::success(id as i64, val),
             (Some(id), Err(err)) => JsonRpc::error(id as i64, err.into()),
             (None, Ok(val)) => {
                 // Note JSON-RPC 2.0 does not properly support pub-sub notifications, because:
@@ -115,14 +129,21 @@ impl From<Error> for jsonrpc_lite::JsonRpc {
     }
 }
 
-impl From<Error> for jsonrpc_lite::Error {
-    fn from(err: Error) -> Self {
+impl From<&Error> for jsonrpc_lite::JsonRpc {
+    fn from(err: &Error) -> Self {
+        jsonrpc_lite::JsonRpc::error(0, err.into())
+    }
+}
+
+impl From<&Error> for jsonrpc_lite::Error {
+    fn from(err: &Error) -> Self {
         match err {
             Error::InvalidId(id) => jsonrpc_lite::Error {
                 code: jsonrpc_lite::ErrorCode::InvalidRequest.code(),
                 message: format!("Invalid id, must be present, not a string and positive"),
                 data: Some(
-                    id.map(|id| serde_json::to_value(&id).unwrap())
+                    id.as_ref()
+                        .map(|id| serde_json::to_value(&id).unwrap())
                         .unwrap_or(serde_json::Value::Null),
                 ),
             },
@@ -132,6 +153,12 @@ impl From<Error> for jsonrpc_lite::Error {
             | Error::ArrayParamsAreInvalid
             | Error::ParamsMustContainASingleRootElement => jsonrpc_lite::Error::invalid_params(),
         }
+    }
+}
+
+impl From<Error> for jsonrpc_lite::Error {
+    fn from(err: Error) -> Self {
+        jsonrpc_lite::Error::from(&err)
     }
 }
 
@@ -358,6 +385,13 @@ impl FromStr for Method {
             "unsubscribe" => Ok(Method::Unsubscribe),
             _ => Err(Error::InvalidMethod),
         }
+    }
+}
+
+impl fmt::Display for NexusResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let jsonrpc = JsonRpc::from(self);
+        write!(f, "{}", serde_json::to_string(&jsonrpc).unwrap())
     }
 }
 

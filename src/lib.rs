@@ -16,6 +16,7 @@ use crate::jsonrpc::{Error, Method, NexusRequest, NexusResponse, Params};
 pub mod jsonrpc;
 pub mod node;
 // pub mod proposal;
+pub mod error;
 pub mod zmq;
 
 /// Configuration for Nexus Relay
@@ -146,13 +147,13 @@ pub async fn async_main(config: Config) -> Result<(), Box<dyn std::error::Error>
     let registry_clone = topic_registry.clone();
     let zmq_endpoint_clone = config.zmq_endpoint.clone();
     let network_clone = config.network;
-    // tokio::spawn(async move {
-    //     if let Err(e) =
-    //         zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone, network_clone).await
-    //     {
-    //         log::error!("Error in ZMQ listener: {}", e);
-    //     }
-    // });
+    tokio::spawn(async move {
+        if let Err(e) =
+            zmq::start_zmq_listener(registry_clone, &zmq_endpoint_clone, network_clone).await
+        {
+            log::error!("Error in ZMQ listener: {}", e);
+        }
+    });
 
     while let Ok((stream, addr)) = listener.accept().await {
         let registry = topic_registry.clone();

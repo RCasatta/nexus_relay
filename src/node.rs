@@ -61,14 +61,14 @@ mod tests {
     use crate::jsonrpc::{NexusRequest, NexusResponse};
     use crate::{async_main, Config, Network};
     use futures_util::{SinkExt, StreamExt};
-    use jsonrpc_lite::JsonRpc;
+    use jsonrpc_lite::{Id, JsonRpc};
 
     use super::Node;
     use bitcoind::bitcoincore_rpc::RpcApi;
     use bitcoind::{BitcoinD, Conf};
     use elements::encode::Decodable;
     use elements::{Address, BlockHash};
-    use serde_json::Value;
+    use serde_json::{json, Value};
     use std::env;
     use std::ffi::OsStr;
     use std::str::FromStr;
@@ -316,13 +316,19 @@ mod tests {
         // Wait for the address notification from ZMQ
         if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
             println!("Received message: {}", text);
-            assert!(text.contains("RESULT") && text.contains(&target_address_str));
+            let jsonrpc = JsonRpc::parse(&text).unwrap();
+            assert_eq!(jsonrpc.get_id(), Some(Id::Num(-1)));
+            assert_eq!(
+                jsonrpc.get_result(),
+                Some(&json!({ "address": target_address_str, "where": "mempool" }))
+            );
         } else {
             assert!(false);
         }
 
         // Subscribe to the transaction ID
-        let subscribe_txid_message = format!("SUBSCRIBE||54321|{}|{}", txid.len(), txid);
+        let id = 54321;
+        let subscribe_txid_message = NexusRequest::new_txid_subscribe(id, &txid).to_string();
         println!("Subscribe to txid message: {}", subscribe_txid_message);
 
         ws_sender
@@ -333,8 +339,9 @@ mod tests {
         // Wait for subscription confirmation
         if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
             println!("Txid subscribe response: {}", text);
-            // Should receive an ACK message
-            assert!(text.contains("ACK") || text.contains("RESULT"));
+            let response = NexusResponse::new_subscribed(id);
+            let jsonrpc = JsonRpc::parse(&text).unwrap();
+            assert_eq!(jsonrpc, response.into());
         } else {
             assert!(false);
         }
@@ -343,20 +350,19 @@ mod tests {
         test_node.generate_to_address(1, &funding_address).unwrap();
         println!("Generated block to confirm transaction");
 
-        // Wait for the txid confirmation notification from ZMQ
-        let mut received_txid_notification = false;
+        // We are receiving two messages, one for the txid and one for the address which is sending two because zmq rawtx is sent twice
+        if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+            println!("Received txid confirmation message: {}", text);
 
-        for _ in 0..2 {
-            // We are receiving two messages, one for the txid and one for the address which is sending two because zmq rawtx is sent twice
-            if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
-                println!("Received txid confirmation message: {}", text);
-
-                // Check if this is a RESULT message containing our txid
-                if text.contains("RESULT") && text.contains(&txid) {
-                    received_txid_notification = true;
-                }
-            }
+            // Check if this is a RESULT message containing our txid
+            let jsonrpc = JsonRpc::parse(&text).unwrap();
+            assert_eq!(jsonrpc.get_id(), Some(Id::Num(-1)));
+            assert_eq!(
+                jsonrpc.get_result(),
+                Some(&json!({ "txid": txid, "where": "block" }))
+            );
+        } else {
+            assert!(false);
         }
-        assert!(received_txid_notification);
     }
 }
