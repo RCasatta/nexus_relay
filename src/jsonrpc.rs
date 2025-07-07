@@ -345,7 +345,6 @@ pub fn parse_method(jsonrpc: &JsonRpc) -> Result<Method, Error> {
 
 impl Params {
     pub fn validate_for_method(&self, method: &Method) -> Result<(), Error> {
-        println!("validate_for_method: {:?}, {:?}", self, method);
         match (self, method) {
             (Params::Any(any), e) => match e {
                 Method::Subscribe => {

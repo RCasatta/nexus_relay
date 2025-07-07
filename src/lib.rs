@@ -422,6 +422,38 @@ mod tests {
         // TODO verify the send to subscribers
     }
 
+    #[test]
+    fn test_process_message_subscribe_empty_topic() {
+        // Create a runtime
+        let rt = Runtime::new().unwrap();
+
+        // Create test message with missing params to trigger an error
+        let message_json = r#"{
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": "subscribe"
+        }"#;
+        let raw_message = JsonRpc::parse(message_json).unwrap();
+        let registry = Arc::new(Mutex::new(TopicRegistry::new()));
+        let (client_tx, _client_rx) = mpsc::unbounded_channel();
+
+        // Process the message - this should now fail due to missing parameters
+        let response = rt.block_on(process_message(raw_message, registry, None, &client_tx));
+
+        // Verify response is an error
+        assert!(response.is_err(), "Expected error but got success");
+        let error = response.unwrap_err();
+        match error {
+            Error::JsonRpc(jsonrpc::Error::InvalidParamsForThisMethod) => {
+                // This is the expected error for empty params with subscribe method
+            }
+            _ => panic!(
+                "Expected InvalidParamsForThisMethod error, got: {:?}",
+                error
+            ),
+        }
+    }
+
     // #[test]
     // fn test_process_message_subscribe_empty_topic() {
     //     // Create a runtime
