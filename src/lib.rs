@@ -331,27 +331,6 @@ mod tests {
         include_str!("../test_data/proposal.json")
     }
 
-    // async fn process_message_test<'a>(
-    //     message_request: &'a Message<'a>,
-    //     registry: Arc<Mutex<TopicRegistry>>,
-    // ) -> String {
-    //     let (client_tx, _client_rx) = mpsc::unbounded_channel();
-
-    //     match process_message(message_request, registry, None, &client_tx).await {
-    //         Ok(response) => response.to_string(),
-    //         Err(e) => {
-    //             let error_string = e.to_string();
-    //             Message::new(MessageType::Error, message_request.random_id, &error_string)
-    //                 .to_string()
-    //         }
-    //     }
-    // }
-
-    // #[test]
-    // fn test_process_message_not_properly_formatted() {
-    //     // TODO refactor out a fn process_str_message() which takes a string and returns a Message so that this is unit testable
-    // }
-
     #[test]
     fn test_process_message_ping() {
         // Create a runtime

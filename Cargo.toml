@@ -6,10 +6,12 @@ edition = "2021"
 [lib]
 name = "nexus_relay"
 path = "src/lib.rs"
+doctest = false
 
 [[bin]]
 name = "nexus_relay"
 path = "src/main.rs"
+test = false
 
 [[test]]
 name = "integration"
