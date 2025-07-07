@@ -326,6 +326,8 @@ mod tests {
             assert!(false);
         }
 
+        // note we are not waiting for the txid seen in mempoolnotification from ZMQ, because we are not subscribed to it
+
         // Subscribe to the transaction ID
         let id = 54321;
         let subscribe_txid_message = NexusRequest::new_txid_subscribe(id, &txid).to_string();

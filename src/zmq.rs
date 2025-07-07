@@ -72,6 +72,29 @@ fn publish_address_seen(registry: &Arc<Mutex<TopicRegistry>>, address: String, w
     }
 }
 
+/// Publish a TxSeen notification to the registry.
+///
+/// This function creates a TxSeen notification and publishes it to the registry
+/// using the txid as the topic.
+fn publish_tx_seen(registry: &Arc<Mutex<TopicRegistry>>, txid: String, where_: Where) {
+    if let Ok(mut registry) = registry.lock() {
+        log::debug!("Publishing message to txid: {}", txid);
+        let topic = Topic::Validated(txid.clone());
+        let tx_seen = TxSeen {
+            txid: txid.clone(),
+            where_,
+        };
+        let tx_seen = serde_json::to_value(&tx_seen).unwrap();
+        let response = NexusResponse::notification(tx_seen);
+        let sent_count = registry.publish(topic, response.to_string());
+        if sent_count > 0 {
+            log::info!("Sent {} messages to txid: {}", sent_count, txid);
+        }
+    } else {
+        log::error!("Failed to lock registry");
+    }
+}
+
 /// Process a single ZMQ message.
 ///
 /// This function handles the raw message content and processes it based on the topic.
@@ -91,7 +114,11 @@ pub fn process_zmq_message(
         let txid = tx.txid().to_string();
         if !tx_seen.contains(&txid) {
             log::debug!("Processing ZMQ message with txid: {}", txid);
-            tx_seen.insert(txid);
+            tx_seen.insert(txid.clone());
+
+            // Publish TxSeen notification for mempool transactions
+            publish_tx_seen(registry, txid, Where::Mempool);
+
             let addresses = get_output_addresses(&tx, network);
             for address_str in addresses {
                 publish_address_seen(registry, address_str, Where::Mempool);
@@ -104,20 +131,8 @@ pub fn process_zmq_message(
             let addresses = get_output_addresses(tx, network);
             let txid = tx.txid().to_string();
 
-            // Publish TxSeen notification
-            if let Ok(mut registry) = registry.lock() {
-                let topic = Topic::Validated(txid.clone());
-                let tx_seen = TxSeen {
-                    txid: txid.clone(),
-                    where_: Where::Block,
-                };
-                let tx_seen = serde_json::to_value(&tx_seen).unwrap();
-                let response = NexusResponse::notification(tx_seen);
-                let sent_count = registry.publish(topic, response.to_string());
-                if sent_count > 0 {
-                    log::info!("Sent {} messages to txid: {}", sent_count, txid);
-                }
-            }
+            // Publish TxSeen notification for block transactions
+            publish_tx_seen(registry, txid, Where::Block);
 
             // Publish AddressSeen notifications for block transactions
             for address_str in addresses {
