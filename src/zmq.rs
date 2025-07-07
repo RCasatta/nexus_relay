@@ -49,6 +49,29 @@ pub fn get_output_addresses(tx: &elements::Transaction, network: &Network) -> Ve
     addresses
 }
 
+/// Publish an AddressSeen notification to the registry.
+///
+/// This function creates an AddressSeen notification and publishes it to the registry
+/// using the address as the topic.
+fn publish_address_seen(registry: &Arc<Mutex<TopicRegistry>>, address: String, where_: Where) {
+    if let Ok(mut registry) = registry.lock() {
+        log::debug!("Publishing message to address: {}", address);
+        let topic = Topic::Validated(address.clone());
+        let address_seen = AddressSeen {
+            address: address.clone(),
+            where_,
+        };
+        let address_seen = serde_json::to_value(&address_seen).unwrap();
+        let response = NexusResponse::notification(address_seen);
+        let sent_count = registry.publish(topic, response.to_string());
+        if sent_count > 0 {
+            log::info!("Sent {} messages to address: {}", sent_count, address);
+        }
+    } else {
+        log::error!("Failed to lock registry");
+    }
+}
+
 /// Process a single ZMQ message.
 ///
 /// This function handles the raw message content and processes it based on the topic.
@@ -71,30 +94,17 @@ pub fn process_zmq_message(
             tx_seen.insert(txid);
             let addresses = get_output_addresses(&tx, network);
             for address_str in addresses {
-                if let Ok(mut registry) = registry.lock() {
-                    log::debug!("Publishing message to address: {}", address_str);
-                    // Publish using the address as the topic
-                    let topic = Topic::Validated(address_str.to_string());
-                    let address_seen = AddressSeen {
-                        address: address_str.to_string(),
-                        where_: Where::Mempool,
-                    };
-                    let address_seen = serde_json::to_value(&address_seen).unwrap();
-                    let response = NexusResponse::notification(address_seen);
-                    let sent_count = registry.publish(topic, response.to_string());
-                    if sent_count > 0 {
-                        log::info!("Sent {} messages to address: {}", sent_count, address_str);
-                    }
-                } else {
-                    log::error!("Failed to lock registry");
-                }
+                publish_address_seen(registry, address_str, Where::Mempool);
             }
         }
     } else if topic == b"rawblock" {
         let block = elements::Block::consensus_decode(data)?;
         log::info!("Processing ZMQ message with block: {}", block.block_hash());
-        let txids = block.txdata.iter().map(|tx| tx.txid().to_string());
-        for txid in txids {
+        for tx in block.txdata.iter() {
+            let addresses = get_output_addresses(tx, network);
+            let txid = tx.txid().to_string();
+
+            // Publish TxSeen notification
             if let Ok(mut registry) = registry.lock() {
                 let topic = Topic::Validated(txid.clone());
                 let tx_seen = TxSeen {
@@ -107,6 +117,11 @@ pub fn process_zmq_message(
                 if sent_count > 0 {
                     log::info!("Sent {} messages to txid: {}", sent_count, txid);
                 }
+            }
+
+            // Publish AddressSeen notifications for block transactions
+            for address_str in addresses {
+                publish_address_seen(registry, address_str, Where::Block);
             }
         }
     }

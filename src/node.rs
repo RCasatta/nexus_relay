@@ -350,7 +350,6 @@ mod tests {
         test_node.generate_to_address(1, &funding_address).unwrap();
         println!("Generated block to confirm transaction");
 
-        // We are receiving two messages, one for the txid and one for the address which is sending two because zmq rawtx is sent twice
         if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
             println!("Received txid confirmation message: {}", text);
 
@@ -360,6 +359,20 @@ mod tests {
             assert_eq!(
                 jsonrpc.get_result(),
                 Some(&json!({ "txid": txid, "where": "block" }))
+            );
+        } else {
+            assert!(false);
+        }
+
+        if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+            println!("Received address confirmation message: {}", text);
+
+            // Check if this is a RESULT message containing our txid
+            let jsonrpc = JsonRpc::parse(&text).unwrap();
+            assert_eq!(jsonrpc.get_id(), Some(Id::Num(-1)));
+            assert_eq!(
+                jsonrpc.get_result(),
+                Some(&json!({ "address": target_address_str, "where": "block" }))
             );
         } else {
             assert!(false);
