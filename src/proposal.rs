@@ -43,24 +43,6 @@ pub async fn process_publish_proposal(
     Ok(message_response)
 }
 
-/// Validate a topic to ensure it's a valid proposal topic
-// pub fn validate_proposal_topic(topic: &str) -> Result<(), Error> {
-//     if topic.len() >= 32 {
-//         // if the topic is longer or equal 32 chars, it must be a proposal topic
-//         let mut assets = topic.splitn(2, ':');
-//         if let (Some(asset1), Some(asset2)) = (assets.next(), assets.next()) {
-//             let asset1 = AssetId::from_str(asset1);
-//             let asset2 = AssetId::from_str(asset2);
-//             if let (Ok(_), Ok(_)) = (asset1, asset2) {
-//                 // topic validated
-//                 return Ok(());
-//             }
-//         }
-//         return Err(Error::InvalidParams);
-//     }
-//     Ok(())
-// }
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;

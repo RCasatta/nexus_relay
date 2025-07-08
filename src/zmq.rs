@@ -314,8 +314,5 @@ mod tests {
             serde_json::from_value(jsonrpc.get_result().unwrap().clone()).unwrap();
         assert_eq!(tx_seen.address, address);
         assert_eq!(tx_seen.where_, Where::Mempool);
-        // let parsed = Message::parse(&message).unwrap();
-        // assert_eq!(parsed.type_, Methods::Result);
-        // assert_eq!(parsed.content(), address);
     }
 }
