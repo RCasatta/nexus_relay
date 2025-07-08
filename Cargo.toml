@@ -37,8 +37,11 @@ thiserror = "1.0"
 [dev-dependencies]
 bitcoind = { version = "0.36.0" }
 hex = "*"
+lwk_signer = "0.9.0"
+lwk_wollet = { version = "0.9.0", features = ["test_wallet"] }
+waterfalls = "*"
 
 [patch.crates-io]
-lwk_wollet = { git = "https://github.com/Blockstream/lwk", rev = "ba7338115a2ffa0d99e327a67f6ba02b65cb074d" }
-lwk_common = { git = "https://github.com/Blockstream/lwk", rev = "ba7338115a2ffa0d99e327a67f6ba02b65cb074d" }
+lwk_wollet = { git = "https://github.com/Blockstream/lwk", rev = "35aff628436760e963f6b3f5277b3fb4f11dbb03" }
+lwk_common = { git = "https://github.com/Blockstream/lwk", rev = "35aff628436760e963f6b3f5277b3fb4f11dbb03" }
 elements = { git = "https://github.com/ElementsProject/rust-elements", rev = "378e753bb26c08705045da6b182523c95cc6f36b" }
