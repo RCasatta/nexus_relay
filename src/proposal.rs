@@ -12,7 +12,7 @@ pub async fn process_publish_proposal(
     client: Option<&Node>,
     id: u32,
 ) -> Result<NexusResponse, Error> {
-    let proposal = proposal.proposal;
+    let proposal = proposal.0;
     let proposal = if let Some(client) = client {
         let txid = proposal.needed_tx()?;
         log::info!("PublishProposal asking for txid: {}", txid);
@@ -56,9 +56,7 @@ mod tests {
     }
 
     fn proposal() -> Proposal {
-        Proposal {
-            proposal: LiquidexProposal::from_str(proposal_str()).unwrap(),
-        }
+        Proposal(LiquidexProposal::from_str(proposal_str()).unwrap())
     }
 
     #[test]

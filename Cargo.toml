@@ -35,13 +35,18 @@ jsonrpc-lite = "0.6.0"
 thiserror = "1.0"
 
 [dev-dependencies]
+lwk_common = { version = "0.9.0" }
 bitcoind = { version = "0.36.0" }
 hex = "*"
 lwk_signer = "0.9.0"
 lwk_wollet = { version = "0.9.0", features = ["test_wallet"] }
-waterfalls = "*"
+waterfalls = { version = "0.8.3", default-features = false, features = [
+    "test_env",
+] }
 
 [patch.crates-io]
 lwk_wollet = { git = "https://github.com/Blockstream/lwk", rev = "35aff628436760e963f6b3f5277b3fb4f11dbb03" }
 lwk_common = { git = "https://github.com/Blockstream/lwk", rev = "35aff628436760e963f6b3f5277b3fb4f11dbb03" }
+lwk_signer = { git = "https://github.com/Blockstream/lwk", rev = "35aff628436760e963f6b3f5277b3fb4f11dbb03" }
 elements = { git = "https://github.com/ElementsProject/rust-elements", rev = "378e753bb26c08705045da6b182523c95cc6f36b" }
+waterfalls = { git = "https://github.com/RCasatta/waterfalls", rev = "766f544fdff7b32b9be7eecee607062a6e16fded" }

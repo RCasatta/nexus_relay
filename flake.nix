@@ -11,7 +11,10 @@
   outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        overlays = [ (import rust-overlay) ];
+        overlays = [ 
+          (import rust-overlay)
+          (import ./rocksdb-overlay.nix)
+        ];
         pkgs = import nixpkgs {
           inherit system overlays;
         };
@@ -42,14 +45,22 @@
           };
           nativeBuildInputs = with pkgs; [
             pkg-config
+            clang
+            llvmPackages.libclang
           ];
           buildInputs = with pkgs; [
             openssl
             elementsd # Add elementsd to buildInputs
+            rocksdb
           ];
           
           # Pass environment variables to the build and test process
           ELEMENTSD_EXEC = "${pkgs.elementsd}/bin/elementsd";
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+          
+          # Link rocksdb dynamically
+          ROCKSDB_INCLUDE_DIR = "${pkgs.rocksdb}/include";
+          ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
           
         };
 
@@ -63,6 +74,10 @@
             websocat  # Added websocat for testing WebSocket connections
             elementsd # Added elementsd for testing
             pythonWithZmq # Added Python with ZMQ support
+            # Add dependencies for RocksDB building
+            clang
+            llvmPackages.libclang
+            rocksdb
           ];
           
           # Set environment variables the Nix way
@@ -73,6 +88,11 @@
             PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig:$PKG_CONFIG_PATH";
             # Make sure rust-analyzer can find the Rust sources
             RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+            # Set libclang path for bindgen
+            LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+            # Link rocksdb dynamically
+            ROCKSDB_INCLUDE_DIR = "${pkgs.rocksdb}/include";
+            ROCKSDB_LIB_DIR = "${pkgs.rocksdb}/lib";
           };
         };
       });

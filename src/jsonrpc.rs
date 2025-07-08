@@ -274,9 +274,7 @@ pub struct Pset {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct Proposal {
-    pub proposal: LiquidexProposal<Unvalidated>,
-}
+pub struct Proposal(pub LiquidexProposal<Unvalidated>);
 
 pub fn topic_from_params(params: &Params) -> Result<Topic, Error> {
     match params {
@@ -319,7 +317,7 @@ pub fn parse_params(jsonrpc: &JsonRpc) -> Result<Params, Error> {
                         "proposal" => {
                             let proposal: LiquidexProposal<Unvalidated> =
                                 serde_json::from_value(value).unwrap();
-                            Ok(Params::Proposal(Proposal { proposal: proposal }))
+                            Ok(Params::Proposal(Proposal(proposal)))
                         }
                         "wallet" => {
                             let pset: Wallet = serde_json::from_value(value).unwrap();
@@ -653,10 +651,7 @@ mod tests {
         let jsonrpc: JsonRpc = serde_json::from_value(jsonrpc).unwrap();
         let request = NexusRequest::try_from(jsonrpc).unwrap();
         assert_eq!(request.method, Method::Publish);
-        assert_eq!(
-            request.params,
-            Params::Proposal(Proposal { proposal: proposal })
-        );
+        assert_eq!(request.params, Params::Proposal(Proposal(proposal)));
     }
 
     #[test]
