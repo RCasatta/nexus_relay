@@ -818,7 +818,8 @@ dependencies = [
 [[package]]
 name = "elements"
 version = "0.25.2"
-source = "git+https://github.com/ElementsProject/rust-elements?rev=378e753bb26c08705045da6b182523c95cc6f36b#378e753bb26c08705045da6b182523c95cc6f36b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81b2569d3495bfdfce36c504fd4d78752ff4a7699f8a33e6f3ee523bddf9f6ad"
 dependencies = [
  "bech32 0.11.0",
  "bitcoin",
@@ -1881,8 +1882,9 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "lwk_common"
-version = "0.9.0"
-source = "git+https://github.com/Blockstream/lwk?rev=35aff628436760e963f6b3f5277b3fb4f11dbb03#35aff628436760e963f6b3f5277b3fb4f11dbb03"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "809878584005752a4fe327bf4529f7ff6449cb55cd87b8b303a51e5b56b02513"
 dependencies = [
  "base64 0.21.7",
  "elements",
@@ -1896,9 +1898,9 @@ dependencies = [
 
 [[package]]
 name = "lwk_containers"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "357528be7457df199f8835865ee0e823da41ed8bcbcb1b6f04fea6ebc97eb174"
+checksum = "231d8daa7f808fa2b0717ce426a354e305e63e0e8ad3465aed9ae1ad4b77079a"
 dependencies = [
  "bitcoin",
  "rand 0.8.5",
@@ -1908,9 +1910,9 @@ dependencies = [
 
 [[package]]
 name = "lwk_jade"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13333941bb75e78781ef95c72130bbcdea42488bf71b9805a19e278a748c3d65"
+checksum = "fc324dc32fe3f3a42f9014096f28e3ab133834e9ce70add9088165add826521b"
 dependencies = [
  "elements",
  "elements-miniscript",
@@ -1931,10 +1933,11 @@ dependencies = [
 
 [[package]]
 name = "lwk_ledger"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cc0c31a0c8dfffc685b5bb621f6564c5ba570e7ae2296b49c4dc8641a7f582c"
+checksum = "3ae6db54c755a5de85186bbce8a15d3b7fd995990d5735e1128bfa68182fbcf8"
 dependencies = [
+ "byteorder",
  "elements-miniscript",
  "ledger-apdu",
  "lwk_common",
@@ -1944,8 +1947,9 @@ dependencies = [
 
 [[package]]
 name = "lwk_signer"
-version = "0.9.0"
-source = "git+https://github.com/Blockstream/lwk?rev=35aff628436760e963f6b3f5277b3fb4f11dbb03#35aff628436760e963f6b3f5277b3fb4f11dbb03"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e25fb7f0b262e2a5bcdef92a93d8e954334de1dc4ccf98c3b4921446223c9109"
 dependencies = [
  "base64 0.13.1",
  "bip39",
@@ -1958,8 +1962,9 @@ dependencies = [
 
 [[package]]
 name = "lwk_wollet"
-version = "0.9.0"
-source = "git+https://github.com/Blockstream/lwk?rev=35aff628436760e963f6b3f5277b3fb4f11dbb03#35aff628436760e963f6b3f5277b3fb4f11dbb03"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8b931abf6849e2c14af01050906e8cb8faf6740c59016ff85782e905d472919"
 dependencies = [
  "aes-gcm-siv",
  "age",
@@ -3847,8 +3852,9 @@ dependencies = [
 
 [[package]]
 name = "waterfalls"
-version = "0.8.3"
-source = "git+https://github.com/RCasatta/waterfalls?rev=766f544fdff7b32b9be7eecee607062a6e16fded#766f544fdff7b32b9be7eecee607062a6e16fded"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7a5ccc8a8cf491ead20c197d6c3817a162935b5daa75c29c115283abdc9b7df"
 dependencies = [
  "age",
  "anyhow",
