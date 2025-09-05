@@ -1221,6 +1221,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex-simd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f7685beb53fc20efc2605f32f5d51e9ba18b8ef237961d1760169d2290d3bee"
+dependencies = [
+ "outref",
+ "vsimd",
+]
+
+[[package]]
 name = "hex_lit"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1881,6 +1891,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "lrumap"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1251ce8e8f9909600e127dcbe74ac50d8464e6685cf5953d37df7a741dbf9e9d"
+
+[[package]]
 name = "lwk_common"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2212,6 +2228,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "outref"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
+
+[[package]]
 name = "parking_lot"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2342,6 +2364,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
+]
+
+[[package]]
+name = "prefix_uvarint"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e506d59806fa96ce3495fdc7ff9ee8f26f2b65e6019dda11c8b35dd73c050a12"
+dependencies = [
+ "bytes",
 ]
 
 [[package]]
@@ -3746,6 +3777,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vsimd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3852,9 +3889,9 @@ dependencies = [
 
 [[package]]
 name = "waterfalls"
-version = "0.8.4"
+version = "0.9.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7a5ccc8a8cf491ead20c197d6c3817a162935b5daa75c29c115283abdc9b7df"
+checksum = "069f67d52b12d6bdd6c0c379e8b221538e78c4dbdae23045fb430b57a6550356"
 dependencies = [
  "age",
  "anyhow",
@@ -3867,13 +3904,16 @@ dependencies = [
  "env_logger 0.11.8",
  "form_urlencoded",
  "fxhash",
- "hex",
+ "hex-simd",
  "http-body-util",
  "hyper 1.6.0",
  "hyper-util",
  "lazy_static",
  "log",
+ "lrumap",
  "minicbor",
+ "miniscript",
+ "prefix_uvarint",
  "prometheus",
  "reqwest 0.12.22",
  "serde",

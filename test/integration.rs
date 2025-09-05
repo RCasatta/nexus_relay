@@ -1,7 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 use jsonrpc_lite::{Id, JsonRpc};
-use lwk_wollet::asyncr::{EsploraClient, EsploraClientBuilder};
-use lwk_wollet::{ElementsNetwork, LiquidexProposal, TxBuilder, Wollet, WolletDescriptor};
+use lwk_wollet::asyncr::EsploraClientBuilder;
+use lwk_wollet::{ElementsNetwork, LiquidexProposal, Wollet};
 use nexus_relay::jsonrpc::{NexusRequest, NexusResponse};
 use nexus_relay::node::Node;
 use nexus_relay::{async_main, Config, Network};
@@ -334,9 +334,10 @@ async fn test_publish_proposal() {
     let (elementsd, zmq_port) = launch_elementsd(elementsd_exe);
     let base_url = elementsd.rpc_url().to_string();
 
-    let waterfalls = waterfalls::test_env::launch_with_node(&elementsd).await;
+    let waterfalls =
+        waterfalls::test_env::launch_with_node(elementsd, waterfalls::Family::Elements).await;
 
-    let test_node = TestNode::new(&elementsd);
+    let test_node = TestNode::new(waterfalls.node());
 
     // Rescan blockchain to recognize initialfreecoins
     test_node.rescan_blockchain().unwrap();
@@ -370,7 +371,7 @@ async fn test_publish_proposal() {
     // ===== Create two LWK wallets (Wallet A and Wallet B) =====
 
     // Create signers for both wallets
-    let (signer_a, mut wollet_a) = Wollet::test_wallet().unwrap();
+    let (_signer_a, mut wollet_a) = Wollet::test_wallet().unwrap();
     let (signer_b, mut wollet_b) = Wollet::test_wallet().unwrap();
 
     // ===== Fund both wallets =====

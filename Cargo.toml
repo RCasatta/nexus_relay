@@ -40,6 +40,6 @@ bitcoind = { version = "0.36.0" }
 hex = "*"
 lwk_signer = "0.10.0"
 lwk_wollet = { version = "0.10.0", features = ["test_wallet"] }
-waterfalls = { version = "0.8.4", default-features = false, features = [
+waterfalls = { version = "0.9.7", default-features = false, features = [
     "test_env",
 ] }
