@@ -121,13 +121,26 @@ Where `$PROPOSAL_JSON` has the following format (removed tx hex for brevity):
 }
 ```
 
-The topic of this proposal is automatically inferred by the proposal json and will be the first asset id concatenated with the second asset id 
-`6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a_7f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28`
-
-Note that in this case the topic is longer than the 32 chars enforced by the generic publish so that clients subscribing to this topic has reasonable guarantee there have been some validation on the proposal by the server. Validations include:
+The topic of this proposal is automatically inferred by the proposal json, and the server is doing the following validations:
 
 - Input exists and it's unspent
 - Liquidex validation rules (see method [validate](https://github.com/Blockstream/lwk/blob/16ec78caf4ba212d38de89446dc519deaba61567/lwk_wollet/src/liquidex.rs#L227) on LiqudexProposal)
+
+#### Subcribe proposal
+
+```json
+{
+    "jsonrpc": "2.0",
+    "method": "subscribe",
+    "id": 1,
+    "params": {
+        "pair": {
+            "input": "6921c799f7b53585025ae8205e376bfd2a7c0571f781649fb360acece252a6a7",
+            "output": "f13806d2ab6ef8ba56fc4680c1689feb21d7596700af1871aef8c2d15d4bfd28"
+        }
+    }
+}
+```
 
 ## Testing
 
