@@ -18,6 +18,8 @@ pub enum Where {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AddressSeen {
     address: String,
+    txid: String,
+    tx_hex: String,
 
     #[serde(rename = "where")]
     where_: Where,
@@ -54,12 +56,20 @@ pub fn get_output_addresses(tx: &elements::Transaction, network: &Network) -> Ve
 ///
 /// This function creates an AddressSeen notification and publishes it to the registry
 /// using the address as the topic.
-fn publish_address_seen(registry: &Arc<Mutex<TopicRegistry>>, address: String, where_: Where) {
+fn publish_address_seen(
+    registry: &Arc<Mutex<TopicRegistry>>,
+    address: String,
+    txid: &str,
+    tx: &elements::Transaction,
+    where_: Where,
+) {
     if let Ok(mut registry) = registry.lock() {
         log::debug!("Publishing message to address: {}", address);
         let topic = Topic::Validated(address.clone());
         let address_seen = AddressSeen {
             address: address.clone(),
+            txid: txid.to_string(),
+            tx_hex: serialize_hex(tx),
             where_,
         };
         let address_seen = serde_json::to_value(&address_seen).unwrap();
@@ -79,16 +89,16 @@ fn publish_address_seen(registry: &Arc<Mutex<TopicRegistry>>, address: String, w
 /// using the txid as the topic.
 fn publish_tx_seen(
     registry: &Arc<Mutex<TopicRegistry>>,
-    txid: String,
+    txid: &str,
     tx: &elements::Transaction,
     where_: Where,
 ) {
     if let Ok(mut registry) = registry.lock() {
         log::debug!("Publishing message to txid: {}", txid);
-        let topic = Topic::Validated(txid.clone());
+        let topic = Topic::Validated(txid.to_string());
         let tx_hex = serialize_hex(tx);
         let tx_seen = TxSeen {
-            txid: txid.clone(),
+            txid: txid.to_string(),
             tx_hex,
             where_,
         };
@@ -125,11 +135,11 @@ pub fn process_zmq_message(
             txs_seen.insert(txid.clone());
 
             // Publish TxSeen notification for mempool transactions
-            publish_tx_seen(registry, txid, &tx, Where::Mempool);
+            publish_tx_seen(registry, &txid, &tx, Where::Mempool);
 
             let addresses = get_output_addresses(&tx, network);
             for address_str in addresses {
-                publish_address_seen(registry, address_str, Where::Mempool);
+                publish_address_seen(registry, address_str, &txid, &tx, Where::Mempool);
             }
         }
     } else if topic == b"rawblock" {
@@ -140,11 +150,11 @@ pub fn process_zmq_message(
             let txid = tx.txid().to_string();
 
             // Publish TxSeen notification for block transactions
-            publish_tx_seen(registry, txid, tx, Where::Block);
+            publish_tx_seen(registry, &txid, tx, Where::Block);
 
             // Publish AddressSeen notifications for block transactions
             for address_str in addresses {
-                publish_address_seen(registry, address_str, Where::Block);
+                publish_address_seen(registry, address_str, &txid, tx, Where::Block);
             }
         }
     }
