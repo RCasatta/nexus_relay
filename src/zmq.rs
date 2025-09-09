@@ -1,5 +1,5 @@
 use crate::{error::Error, jsonrpc::NexusResponse, Network, Topic, TopicRegistry};
-use elements::encode::Decodable;
+use elements::encode::{serialize_hex, Decodable};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -26,6 +26,7 @@ pub struct AddressSeen {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TxSeen {
     txid: String,
+    tx_hex: String,
 
     #[serde(rename = "where")]
     where_: Where,
@@ -76,12 +77,19 @@ fn publish_address_seen(registry: &Arc<Mutex<TopicRegistry>>, address: String, w
 ///
 /// This function creates a TxSeen notification and publishes it to the registry
 /// using the txid as the topic.
-fn publish_tx_seen(registry: &Arc<Mutex<TopicRegistry>>, txid: String, where_: Where) {
+fn publish_tx_seen(
+    registry: &Arc<Mutex<TopicRegistry>>,
+    txid: String,
+    tx: &elements::Transaction,
+    where_: Where,
+) {
     if let Ok(mut registry) = registry.lock() {
         log::debug!("Publishing message to txid: {}", txid);
         let topic = Topic::Validated(txid.clone());
+        let tx_hex = serialize_hex(tx);
         let tx_seen = TxSeen {
             txid: txid.clone(),
+            tx_hex,
             where_,
         };
         let tx_seen = serde_json::to_value(&tx_seen).unwrap();
@@ -117,7 +125,7 @@ pub fn process_zmq_message(
             txs_seen.insert(txid.clone());
 
             // Publish TxSeen notification for mempool transactions
-            publish_tx_seen(registry, txid, Where::Mempool);
+            publish_tx_seen(registry, txid, tx, Where::Mempool);
 
             let addresses = get_output_addresses(&tx, network);
             for address_str in addresses {
@@ -132,7 +140,7 @@ pub fn process_zmq_message(
             let txid = tx.txid().to_string();
 
             // Publish TxSeen notification for block transactions
-            publish_tx_seen(registry, txid, Where::Block);
+            publish_tx_seen(registry, txid, tx, Where::Block);
 
             // Publish AddressSeen notifications for block transactions
             for address_str in addresses {
