@@ -125,7 +125,7 @@ pub fn process_zmq_message(
             txs_seen.insert(txid.clone());
 
             // Publish TxSeen notification for mempool transactions
-            publish_tx_seen(registry, txid, tx, Where::Mempool);
+            publish_tx_seen(registry, txid, &tx, Where::Mempool);
 
             let addresses = get_output_addresses(&tx, network);
             for address_str in addresses {

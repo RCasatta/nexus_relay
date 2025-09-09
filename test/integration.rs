@@ -300,11 +300,13 @@ async fn test_publish_from_zmq() {
 
         // Check if this is a RESULT message containing our txid
         let jsonrpc = JsonRpc::parse(&text).unwrap();
+        let mut result = jsonrpc.get_result().unwrap().clone();
+        assert!(result.get("tx_hex").is_some());
+        if let Value::Object(ref mut map) = result {
+            map.remove("tx_hex");
+        }
         assert_eq!(jsonrpc.get_id(), Some(Id::Num(-1)));
-        assert_eq!(
-            jsonrpc.get_result(),
-            Some(&json!({ "txid": txid, "where": "block" }))
-        );
+        assert_eq!(result, json!({ "txid": txid, "where": "block" }));
     } else {
         assert!(false);
     }
