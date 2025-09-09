@@ -15,6 +15,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
+use tokio_tungstenite::tungstenite::Message;
 
 pub struct TestNode<'a> {
     elementsd: &'a BitcoinD,
@@ -328,9 +329,6 @@ async fn test_publish_from_zmq() {
 
 #[tokio::test]
 async fn test_publish_proposal() {
-    // Note: This test requires the liquidex_make functionality from LWK master branch
-    // Current LWK release (0.9.0) does not include liquidex_make, but the master branch should
-
     let network = ElementsNetwork::default_regtest();
     let elementsd_exe = env::var("ELEMENTSD_EXEC").expect("ELEMENTSD_EXEC must be set");
     let (elementsd, zmq_port) = launch_elementsd(elementsd_exe);
@@ -466,6 +464,12 @@ async fn test_publish_proposal() {
         .next()
         .unwrap();
 
+    // Store values for later validation
+    let lbtc_asset_id = network.policy_asset();
+    let asset_id = issued_asset_id;
+    let lbtc_amount = 10_000u64;
+    let asset_amount_wanted = outpoint_to_trade.unblinded.value;
+
     // Create liquidex proposal from wallet A
     // Wallet A wants to trade L-BTC for asset X
     let receive_address = wollet_b.address(None).unwrap();
@@ -504,25 +508,26 @@ async fn test_publish_proposal() {
     let id = 12345;
 
     // Create pair subscription manually using the JSON structure
+    // The proposal trades issued_asset for L-BTC, so we subscribe to that pair
     let subscribe_message = json!({
         "id": id,
         "jsonrpc": "2.0",
         "method": "subscribe",
         "params": {
             "pair": {
-                "input": network.policy_asset().to_string(),  // L-BTC asset ID
-                "output": issued_asset_id.to_string()       // Asset X ID
+                "input": issued_asset_id.to_string(),       // Asset X ID (what the proposal offers)
+                "output": network.policy_asset().to_string() // L-BTC asset ID (what the proposal wants)
             }
         }
     });
 
     ws_sender
-        .send(TungsteniteMessage::Text(subscribe_message.to_string()))
+        .send(Message::Text(subscribe_message.to_string()))
         .await
         .expect("Failed to send subscribe message");
 
     // Wait for subscription confirmation
-    if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+    if let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
         println!("Subscribe response: {}", text);
         let response = NexusResponse::new_subscribed(id);
         let jsonrpc = JsonRpc::parse(&text).unwrap();
@@ -542,28 +547,13 @@ async fn test_publish_proposal() {
     println!("Publish message: {}", publish_message);
 
     ws_sender
-        .send(TungsteniteMessage::Text(publish_message))
+        .send(Message::Text(publish_message))
         .await
         .expect("Failed to send proposal");
 
-    // Wait for publish confirmation
-    if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
-        println!("Publish response: {}", text);
-        let response = NexusResponse::new_published(publish_id);
-        let jsonrpc = JsonRpc::parse(&text).unwrap();
-        assert_eq!(jsonrpc, response.into());
-    } else {
-        panic!("Failed to receive publish confirmation");
-    }
-
-    // ===== TODO: Retrieve the proposal from the relay =====
-    // Note: This section is commented out because we don't have a real proposal yet
-    // The liquidex_make API is not available in the current LWK version
-    // Once the API is available, this would receive and validate a real proposal
-
-    /*
-    // The subscribed client should receive the proposal notification
-    if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
+    // The subscribed client should receive the proposal notification first
+    // (this happens immediately when the proposal is published)
+    if let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
         println!("Received proposal: {}", text);
 
         let jsonrpc = JsonRpc::parse(&text).unwrap();
@@ -574,18 +564,29 @@ async fn test_publish_proposal() {
             let received_proposal: lwk_wollet::LiquidexProposal<lwk_wollet::Unvalidated> =
                 serde_json::from_value(result.clone()).expect("Failed to parse proposal");
 
+            let received_proposal = received_proposal.insecure_validate().unwrap();
             // Validate the proposal matches what we sent
-            assert_eq!(received_proposal.input().asset, lbtc_asset_id);
-            assert_eq!(received_proposal.output().asset, asset_id);
-            assert_eq!(received_proposal.input().satoshi, lbtc_amount);
-            assert_eq!(received_proposal.output().satoshi, asset_amount_wanted);
+            // The proposal offers the issued asset and wants L-BTC
+            assert_eq!(received_proposal.input().asset, asset_id); // Input: issued asset
+            assert_eq!(received_proposal.output().asset, lbtc_asset_id); // Output: L-BTC
+            assert_eq!(received_proposal.input().amount, asset_amount_wanted); // Input amount: issued asset amount
+            assert_eq!(received_proposal.output().amount, lbtc_amount); // Output amount: L-BTC amount wanted
         } else {
             panic!("Expected proposal in notification result");
         }
     } else {
         panic!("Failed to receive proposal notification");
     }
-    */
+
+    // Now wait for publish confirmation response
+    if let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
+        println!("Publish response: {}", text);
+        let response = NexusResponse::new_published(publish_id);
+        let jsonrpc = JsonRpc::parse(&text).unwrap();
+        assert_eq!(jsonrpc, response.into());
+    } else {
+        panic!("Failed to receive publish confirmation");
+    }
 
     // ===== TODO: Accept the proposal in wallet B =====
     /*
@@ -629,39 +630,6 @@ async fn test_publish_proposal() {
 
     println!("✓ LiquiDEX trade completed successfully!");
     */
-
-    // ===== CURRENT WORKING IMPLEMENTATION =====
-    // For now, just ensure the basic relay infrastructure is working
-    // This part works with the current codebase
-
-    println!("test_publish_proposal: Skeleton implementation completed");
-    println!(
-        "TODO: Implement wallet creation, funding, asset issuance, and liquidex functionality"
-    );
-    println!("TODO: This test requires the liquidex_make and liquidex_take functionality from LWK master branch");
-    println!("TODO: Key missing APIs: TxBuilder::liquidex_make(), TxBuilder::liquidex_take()");
-    println!("TODO: Also need proper wallet creation, funding, and asset issuance workflows");
-
-    // Test basic ping to ensure the relay is running
-    let id = 99999;
-    let ping_message = NexusRequest::new_ping(id).to_string();
-
-    use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
-    ws_sender
-        .send(TungsteniteMessage::Text(ping_message))
-        .await
-        .expect("Failed to send ping");
-
-    if let Some(Ok(TungsteniteMessage::Text(text))) = ws_receiver.next().await {
-        println!("Ping response: {}", text);
-        let jsonrpc = JsonRpc::parse(&text).unwrap();
-        let expected_response = NexusResponse::new_pong(id);
-        assert_eq!(jsonrpc, expected_response.into());
-        println!("✓ Nexus relay is running and responding correctly");
-        println!("✓ Test infrastructure is ready for liquidex implementation");
-    } else {
-        panic!("Failed to receive ping response");
-    }
 
     waterfalls.shutdown().await;
 }
