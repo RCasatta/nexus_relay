@@ -371,7 +371,7 @@ async fn test_publish_proposal() {
     // ===== Create two LWK wallets (Wallet A and Wallet B) =====
 
     // Create signers for both wallets
-    let (_signer_a, mut wollet_a) = Wollet::test_wallet().unwrap();
+    let (signer_a, mut wollet_a) = Wollet::test_wallet().unwrap();
     let (signer_b, mut wollet_b) = Wollet::test_wallet().unwrap();
 
     // ===== Fund both wallets =====
@@ -446,8 +446,14 @@ async fn test_publish_proposal() {
 
     wollet_b.apply_update(update_b).unwrap();
 
-    // ===== Create LiquiDEX proposal using TxBuilder liquidex_make from wallet A =====
-    // This is the core functionality that needs liquidex_make from LWK master
+    // Verify the trade completed successfully
+    let balance_a = wollet_a.balance().unwrap();
+    let balance_b = wollet_b.balance().unwrap();
+
+    println!("Wallet A initial balance: {:?}", balance_a);
+    println!("Wallet B initial balance: {:?}", balance_b);
+
+    // ===== Create LiquiDEX proposal using TxBuilder liquidex_make from wallet B =====
 
     // Get the asset ID from the issuance transaction using the Node
     let assets = wollet_b.assets_owned().unwrap();
@@ -466,19 +472,18 @@ async fn test_publish_proposal() {
 
     // Store values for later validation
     let lbtc_asset_id = network.policy_asset();
-    let asset_id = issued_asset_id;
     let lbtc_amount = 10_000u64;
     let asset_amount_wanted = outpoint_to_trade.unblinded.value;
 
-    // Create liquidex proposal from wallet A
-    // Wallet A wants to trade L-BTC for asset X
+    // Create liquidex proposal from wallet B
+    // Wallet B wants to trade asset X for 10_000 Lsats
     let receive_address = wollet_b.address(None).unwrap();
     let mut pset = wollet_b
         .tx_builder()
         .liquidex_make(
             outpoint_to_trade.outpoint,
             receive_address.address(),
-            10_000,
+            lbtc_amount,
             network.policy_asset(),
         )
         .unwrap()
@@ -486,7 +491,6 @@ async fn test_publish_proposal() {
         .unwrap();
     signer_b.sign(&mut pset).unwrap();
     let proposal = LiquidexProposal::from_pset(&pset).unwrap();
-    println!("Proposal: {:?}", proposal);
 
     // The proposal should be a LiquidexProposal<Unvalidated>
     // It can then be wrapped in our Proposal struct for the nexus relay
@@ -544,7 +548,6 @@ async fn test_publish_proposal() {
     let publish_id = 54321;
     let publish_message =
         NexusRequest::new_publish_proposal(publish_id, nexus_proposal).to_string();
-    println!("Publish message: {}", publish_message);
 
     ws_sender
         .send(Message::Text(publish_message))
@@ -553,30 +556,30 @@ async fn test_publish_proposal() {
 
     // The subscribed client should receive the proposal notification first
     // (this happens immediately when the proposal is published)
-    if let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
-        println!("Received proposal: {}", text);
+    let received_proposal: lwk_wollet::LiquidexProposal<lwk_wollet::Validated> =
+        if let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
+            let jsonrpc = JsonRpc::parse(&text).unwrap();
+            assert_eq!(jsonrpc.get_id(), Some(jsonrpc_lite::Id::Num(-1))); // Notification
 
-        let jsonrpc = JsonRpc::parse(&text).unwrap();
-        assert_eq!(jsonrpc.get_id(), Some(jsonrpc_lite::Id::Num(-1))); // Notification
+            // Extract and validate the proposal
+            if let Some(result) = jsonrpc.get_result() {
+                let proposal: lwk_wollet::LiquidexProposal<lwk_wollet::Unvalidated> =
+                    serde_json::from_value(result.clone()).expect("Failed to parse proposal");
 
-        // Extract and validate the proposal
-        if let Some(result) = jsonrpc.get_result() {
-            let received_proposal: lwk_wollet::LiquidexProposal<lwk_wollet::Unvalidated> =
-                serde_json::from_value(result.clone()).expect("Failed to parse proposal");
-
-            let received_proposal = received_proposal.insecure_validate().unwrap();
-            // Validate the proposal matches what we sent
-            // The proposal offers the issued asset and wants L-BTC
-            assert_eq!(received_proposal.input().asset, asset_id); // Input: issued asset
-            assert_eq!(received_proposal.output().asset, lbtc_asset_id); // Output: L-BTC
-            assert_eq!(received_proposal.input().amount, asset_amount_wanted); // Input amount: issued asset amount
-            assert_eq!(received_proposal.output().amount, lbtc_amount); // Output amount: L-BTC amount wanted
+                let validated_proposal = proposal.insecure_validate().unwrap();
+                // Validate the proposal matches what we sent
+                // The proposal offers the issued asset and wants L-BTC
+                assert_eq!(validated_proposal.input().asset, issued_asset_id); // Input: issued asset
+                assert_eq!(validated_proposal.output().asset, lbtc_asset_id); // Output: L-BTC
+                assert_eq!(validated_proposal.input().amount, asset_amount_wanted); // Input amount: issued asset amount
+                assert_eq!(validated_proposal.output().amount, lbtc_amount); // Output amount: L-BTC amount wanted
+                validated_proposal
+            } else {
+                panic!("Expected proposal in notification result");
+            }
         } else {
-            panic!("Expected proposal in notification result");
-        }
-    } else {
-        panic!("Failed to receive proposal notification");
-    }
+            panic!("Failed to receive proposal notification");
+        };
 
     // Now wait for publish confirmation response
     if let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
@@ -588,48 +591,92 @@ async fn test_publish_proposal() {
         panic!("Failed to receive publish confirmation");
     }
 
-    // ===== TODO: Accept the proposal in wallet B =====
-    /*
-    // Wallet B receives the proposal and decides to accept it
+    // ===== Accept the proposal in wallet A =====
+    // Wallet A receives the proposal and decides to accept it
     // This involves creating a taking transaction using liquidex_take
 
-    use lwk_wollet::TxBuilder;
-
-    let mut take_builder = TxBuilder::new();
+    println!("Accepting the LiquiDEX proposal...");
 
     // Create the take transaction
-    // Note: liquidex_take API needs to be confirmed from LWK master
-    let take_pset = take_builder
-        .liquidex_take(&received_proposal)?
-        .finish(&wallet_b)?;
+    let mut take_pset = wollet_a
+        .tx_builder()
+        .liquidex_take(vec![received_proposal])
+        .unwrap()
+        .finish()
+        .unwrap();
 
-    // Sign and finalize the take transaction
-    let signed_take = signer_b.sign(&take_pset)?;
-    let final_tx = signed_take.extract_tx()?;
+    // Sign the take transaction
+    signer_a.sign(&mut take_pset).unwrap();
+    wollet_a.finalize(&mut take_pset).unwrap();
+    let take_tx = take_pset.extract_tx().unwrap();
 
     // Broadcast the trade transaction
-    let txid_trade = test_node.broadcast_tx(&final_tx)?;
+    let txid_trade = waterfalls_client.broadcast(&take_tx).await.unwrap();
+    println!("Trade transaction broadcasted: {}", txid_trade);
 
     // Generate block to confirm the trade
-    test_node.generate_to_address(1, &funding_address)?;
+    test_node.generate_to_address(1, &funding_address).unwrap();
+    println!("Block generated to confirm trade");
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
     // Update both wallets to see the completed trade
-    let update_a = Update::from_rpc(...)?;
-    let update_b = Update::from_rpc(...)?;
-    wallet_a.apply_update(update_a)?;
-    wallet_b.apply_update(update_b)?;
+    let update_a = waterfalls_client
+        .full_scan(&wollet_a)
+        .await
+        .unwrap()
+        .unwrap();
+    let update_b = waterfalls_client
+        .full_scan(&wollet_b)
+        .await
+        .unwrap()
+        .unwrap();
+
+    wollet_a.apply_update(update_a).unwrap();
+    wollet_b.apply_update(update_b).unwrap();
 
     // Verify the trade completed successfully
-    let wallet_a_balances = wallet_a.balance()?;
-    let wallet_b_balances = wallet_b.balance()?;
+    let balance_a = wollet_a.balance().unwrap();
+    let balance_b = wollet_b.balance().unwrap();
 
-    // Wallet A should now have asset X
-    assert!(wallet_a_balances.get(&asset_id).unwrap_or(&0) >= &asset_amount_wanted);
+    println!("Wallet A full balance: {:?}", balance_a);
+    println!("Wallet B full balance: {:?}", balance_b);
+
+    // Wallet A should now have the issued asset
+    let asset_balance_a = balance_a.get(&issued_asset_id).unwrap_or(&0);
+    println!(
+        "Wallet A asset balance: {} (expected at least: {})",
+        asset_balance_a, asset_amount_wanted
+    );
+
     // Wallet B should now have the L-BTC
-    assert!(wallet_b_balances.get(lbtc_asset_id).unwrap_or(&0) >= &lbtc_amount);
+    let lbtc_balance_b = balance_b.get(&lbtc_asset_id).unwrap_or(&0);
+    println!(
+        "Wallet B L-BTC balance: {} (expected at least: {})",
+        lbtc_balance_b, lbtc_amount
+    );
+
+    // Check if the trade actually happened by looking at total L-BTC amounts
+    let total_lbtc_a = balance_a.get(&lbtc_asset_id).unwrap_or(&0);
+    let total_lbtc_b = balance_b.get(&lbtc_asset_id).unwrap_or(&0);
+    println!(
+        "Total L-BTC - Wallet A: {}, Wallet B: {}",
+        total_lbtc_a, total_lbtc_b
+    );
+
+    // The trade should have transferred assets between wallets
+    // Wallet A should have received the issued asset
+    // Wallet B should have received the L-BTC
+    assert!(
+        *asset_balance_a >= asset_amount_wanted,
+        "Wallet A should have received the issued asset"
+    );
+    assert!(
+        *lbtc_balance_b >= lbtc_amount,
+        "Wallet B should have received the L-BTC"
+    );
 
     println!("✓ LiquiDEX trade completed successfully!");
-    */
 
     waterfalls.shutdown().await;
 }
