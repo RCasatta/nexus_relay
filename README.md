@@ -148,8 +148,6 @@ You can test the WebSocket server using tools like `websocat`:
 
 ### Ping
 
-To test with Liquid asset pairs:
-
 ```bash
 # Terminal 1: ping
 $ echo '{"jsonrpc": "2.0", "method": "publish", "id": 1, "params": { "ping": null} }' | websocat wss://nexus.liquidwebwallet.org/testnet
